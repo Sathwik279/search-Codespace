@@ -65,11 +65,9 @@ btree.js
   Defines StringBTree and its node structure. The configurable order controls
   the maximum number of keys per node (2 * order). Insertion keeps string keys
   sorted, groups each term's positions and match lengths by page, and splits
-  overflowing nodes. `search(key)` returns page/position groups for an exact key or null;
-  `prefixSearch(prefix)` returns matching key/posting entries in sorted order.
-  `serialize()` and
-  `StringBTree.deserialize(data)` convert the in-memory tree to and from a
-  structured-cloneable representation for IndexedDB.
+  overflowing nodes. `search(key)` returns page/position groups for an exact
+  key or null. `serialize()` and `StringBTree.deserialize(data)` convert the
+  in-memory tree to and from a structured-cloneable representation for IndexedDB.
 
 index-storage.js
   Stores each document's page text and serialized B-tree in the extension's
@@ -143,7 +141,7 @@ Index initialization
     ]
 
   Query words are normalized the same way as indexed words. Each query token
-  uses a B-tree prefix search, so a query prefix may match longer indexed
+  uses an exact B-tree lookup, so partial words do not match longer indexed
   words. Results are grouped by page and displayed in ascending page-number
   order. Each page result is an expandable section showing that page's
   occurrence count and one separate context snippet for every matching word
@@ -208,7 +206,7 @@ Load and test in Chrome
 2. Select "Load unpacked" and choose the ExtensionSearch folder. On Chrome
    114+, the extension action opens the side panel.
 3. Open a text-based webpage or PDF in a tab and click the extension icon.
-4. Wait for the status to say the index is saved, then enter a word or prefix.
+4. Wait for the status to say the index is saved, then enter one or more exact words.
    Results show a snippet, page, and match score.
 5. Close and reopen the side panel for that document to restore the saved
    index and previous search. Use the refresh icon to rebuild after the source

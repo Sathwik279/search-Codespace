@@ -131,38 +131,37 @@ async function searchIndex(query) {
   const uniqueQueryTokens = new Set(queryTokens);
   const pages = new Map();
   for (const queryToken of uniqueQueryTokens) {
-    const matchingTerms = invertedIndex.prefixSearch(queryToken);
-    for (const term of matchingTerms) {
-      for (const pagePostings of term.values) {
-        if (
-          !Array.isArray(pagePostings.positions) ||
-          !Array.isArray(pagePostings.lengths) ||
-          pagePostings.positions.length !== pagePostings.lengths.length
-        ) continue;
-        let pageResult = pages.get(pagePostings.page);
-        if (!pageResult) {
-          pageResult = {
-            page: pagePostings.page,
-            matchedTerms: new Set(),
-            occurrences: new Map()
+    const pagePostingsList = invertedIndex.search(queryToken);
+    if (!Array.isArray(pagePostingsList)) continue;
+    for (const pagePostings of pagePostingsList) {
+      if (
+        !Array.isArray(pagePostings.positions) ||
+        !Array.isArray(pagePostings.lengths) ||
+        pagePostings.positions.length !== pagePostings.lengths.length
+      ) continue;
+      let pageResult = pages.get(pagePostings.page);
+      if (!pageResult) {
+        pageResult = {
+          page: pagePostings.page,
+          matchedTerms: new Set(),
+          occurrences: new Map()
+        };
+        pages.set(pagePostings.page, pageResult);
+      }
+      pageResult.matchedTerms.add(queryToken);
+      for (let postingIndex = 0; postingIndex < pagePostings.positions.length; postingIndex += 1) {
+        const position = pagePostings.positions[postingIndex];
+        const occurrenceKey = `${queryToken}:${position}`;
+        let occurrence = pageResult.occurrences.get(occurrenceKey);
+        if (!occurrence) {
+          occurrence = {
+            position,
+            end: position + pagePostings.lengths[postingIndex],
+            terms: new Set()
           };
-          pages.set(pagePostings.page, pageResult);
+          pageResult.occurrences.set(occurrenceKey, occurrence);
         }
-        pageResult.matchedTerms.add(queryToken);
-        for (let postingIndex = 0; postingIndex < pagePostings.positions.length; postingIndex += 1) {
-          const position = pagePostings.positions[postingIndex];
-          const occurrenceKey = `${term.key}:${position}`;
-          let occurrence = pageResult.occurrences.get(occurrenceKey);
-          if (!occurrence) {
-            occurrence = {
-              position,
-              end: position + pagePostings.lengths[postingIndex],
-              terms: new Set()
-            };
-            pageResult.occurrences.set(occurrenceKey, occurrence);
-          }
-          occurrence.terms.add(term.key);
-        }
+        occurrence.terms.add(queryToken);
       }
     }
   }
@@ -213,7 +212,7 @@ function renderResults(results) {
   resultCountElement.textContent = `${pageCount} · ${occurrenceCount}`;
 
   if (results.length === 0) {
-    showMessage("No pages matched that search. Try another word or prefix.");
+    showMessage("No pages matched those exact words. Try another search.");
     return;
   }
 
@@ -288,7 +287,7 @@ async function runSearch(rawQuery, persist = true) {
   const loadId = currentLoadId;
 
   if (!query) {
-    showMessage("Search by a word or a word prefix.");
+    showMessage("Search by one or more exact words.");
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
     if (persist && documentUrl) {
       try {
@@ -461,7 +460,7 @@ async function loadActiveTabText(forceRefresh = false) {
           if (savedQuery) {
             await runSearch(savedQuery, false);
           } else {
-            showMessage("Search this saved document by word or prefix.");
+            showMessage("Search this saved document by one or more exact words.");
           }
           return;
         } catch (restoreError) {
@@ -502,7 +501,7 @@ async function loadActiveTabText(forceRefresh = false) {
     if (savedQuery) {
       await runSearch(savedQuery, false);
     } else {
-      showMessage("Search this document by word or prefix.");
+      showMessage("Search this document by one or more exact words.");
     }
   } catch (error) {
     if (loadId !== currentLoadId) return;
@@ -526,6 +525,7 @@ refreshButton.addEventListener("click", () => {
 chrome.tabs.onActivated.addListener(() => {
   void loadActiveTabText();
 });
+
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (tabId === activeTabId && changeInfo.status === "complete") {
