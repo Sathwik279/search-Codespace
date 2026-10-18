@@ -1,7 +1,23 @@
 const EXTRACTION_ERROR =
-  "Chrome did not allow this extension to read the active tab. If this is a PDF, its built-in viewer may block extension access. Try a readable webpage or a PDF viewer that exposes its text in the page.";
+  "Chrome did not allow this extension to read the active webpage. Try an ordinary webpage that exposes readable text.";
+
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
+  console.error("Could not configure the extension side panel:", error);
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "GET_ACTIVE_TAB") {
+    getActiveTabUrl()
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      });
+    return true;
+  }
+
   if (message?.type !== "EXTRACT_ACTIVE_TAB") {
     return false;
   }
@@ -17,6 +33,19 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return true;
 });
+
+async function getActiveTabUrl() {
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true
+  });
+
+  if (!tab?.url) {
+    return { ok: false, error: "Could not find the active tab URL." };
+  }
+
+  return { ok: true, url: tab.url, title: tab.title || "", tabId: tab.id };
+}
 
 async function extractActiveTabText() {
   const [tab] = await chrome.tabs.query({

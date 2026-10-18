@@ -3,39 +3,77 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Active Tab Text Search</title>
+    <title>Document Search</title>
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <main class="popup">
+    <main class="app-shell">
       <header class="header">
-        <div class="eyebrow">ACTIVE TAB</div>
-        <h1>Text Search</h1>
+        <div class="brand-mark" aria-hidden="true">S</div>
+        <div class="header-copy">
+          <div class="eyebrow">DOCUMENT SEARCH</div>
+          <h1>Search this document</h1>
+        </div>
+        <button id="refresh-button" class="icon-button" type="button" aria-label="Refresh document index" title="Refresh document index" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 7v5h-5M4 17v-5h5"></path>
+            <path d="M5.6 9a7 7 0 0 1 11.8-2L20 12M4 12l2.6 5a7 7 0 0 0 11.8-2"></path>
+          </svg>
+        </button>
       </header>
 
-      <p id="status" class="status" role="status" aria-live="polite">
-        Extracting text from the active tab…
-      </p>
+      <section class="document-card" aria-label="Current document">
+        <div class="document-icon" aria-hidden="true">DOC</div>
+        <div class="document-copy">
+          <span id="document-title" class="document-title">Connecting to active tab…</span>
+          <span id="document-location" class="document-location"></span>
+        </div>
+      </section>
 
-      <label class="search-label" for="search-input">Search this document</label>
-      <input
-        id="search-input"
-        type="search"
-        placeholder="Enter a search term"
-        autocomplete="off"
-        disabled
-      >
+      <div id="status" class="status" role="status" aria-live="polite" data-state="loading">
+        <span class="status-indicator" aria-hidden="true"></span>
+        <span id="status-message">Loading document…</span>
+      </div>
+
+      <section class="search-section" aria-label="Search document">
+        <label class="search-label" for="search-input">Search within this document</label>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.8" cy="10.8" r="6.8"></circle>
+            <path d="m16 16 4.5 4.5"></path>
+          </svg>
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Type a word or prefix…"
+            autocomplete="off"
+            disabled
+          >
+        </div>
+      </section>
 
       <section class="results-section" aria-labelledby="results-heading">
         <div class="results-header">
-          <h2 id="results-heading">Results</h2>
+          <div>
+            <h2 id="results-heading">Search results</h2>
+            <p class="results-hint">Expand a page to view each occurrence</p>
+          </div>
           <span id="result-count" class="result-count"></span>
         </div>
         <div id="results" class="results" aria-live="polite">
-          <p class="empty-state">Your results will appear here.</p>
+          <div class="empty-state">
+            <span class="empty-icon" aria-hidden="true">⌕</span>
+            <p>Open a document to get started.</p>
+          </div>
         </div>
       </section>
+
+      <footer class="footer">Your document index is saved locally on this device.</footer>
     </main>
+    <script src="btree.js"></script>
+    <script src="index-storage.js"></script>
+    <script src="pdf-text.js"></script>
+    <script src="pdfjs/pdf.min.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

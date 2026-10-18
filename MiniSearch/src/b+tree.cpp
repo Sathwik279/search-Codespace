@@ -8,7 +8,7 @@ constexpr int order = 2; // this is a constexpr bcoz it need to be avaliable at 
 
 // constraints of our B+tree.
 // 1. all the leaf nodes are in the same level.
-// 2. execpt the root node each other node must have no of keys in range order - 2*order and the pointers order+1 - 2*order+1.
+// 2. execpt the root node each other node must have no of keys in range order order - 2*order and the pointers order+1 - 2*order+1.
 // 3. we are taking < and >= for the key all the keys to the left of ckey must be < ckey and all the keys to the right of ckey can be >= ckey.
 
 
@@ -185,7 +185,6 @@ pair<int, Node*> insert(Node*& currNode, int insVal){
     }
 
     return {0,nullptr};
-
 
 }
 
