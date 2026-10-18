@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Active Tab Text Search</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="popup">
+      <header class="header">
+        <div class="eyebrow">ACTIVE TAB</div>
+        <h1>Text Search</h1>
+      </header>
+
+      <p id="status" class="status" role="status" aria-live="polite">
+        Extracting text from the active tab…
+      </p>
+
+      <label class="search-label" for="search-input">Search this document</label>
+      <input
+        id="search-input"
+        type="search"
+        placeholder="Enter a search term"
+        autocomplete="off"
+        disabled
+      >
+
+      <section class="results-section" aria-labelledby="results-heading">
+        <div class="results-header">
+          <h2 id="results-heading">Results</h2>
+          <span id="result-count" class="result-count"></span>
+        </div>
+        <div id="results" class="results" aria-live="polite">
+          <p class="empty-state">Your results will appear here.</p>
+        </div>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Active Tab Text Search",
+  "version": "1.0.0",
+  "description": "Extract readable text from the active tab and provide a hook for custom indexed search.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Search active tab",
+    "default_popup": "popup.html"
+  }
+}

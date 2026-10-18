@@ -1,0 +1,11 @@
+{
+    "name": "Web_Download",
+    "version": "1.0.0",
+    "description": "This projects downloads the website static version given the url of the website",
+    "main":"index.js",
+    "scripts":{
+        "start":"node index.js"
+    },
+    "dependencies": {},
+    "type":"module"
+}
