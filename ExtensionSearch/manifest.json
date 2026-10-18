@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Document Search",
+  "version": "1.0.0",
+  "description": "Search active webpages and PDFs with a locally persisted B-tree index.",
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "action": {
+    "default_title": "Search active tab"
+  },
+  "minimum_chrome_version": "114"
+}

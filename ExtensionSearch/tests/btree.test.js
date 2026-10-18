@@ -1,0 +1,99 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const StringBTree = require("../btree.js");
+
+test("groups repeated term positions by page", () => {
+  const tree = new StringBTree(2);
+  tree.insert("search", { page: 1, position: 4, end: 10 });
+  tree.insert("search", { page: 1, position: 20, end: 26 });
+  tree.insert("search", { page: 2, position: 9, end: 15 });
+
+  assert.deepEqual(tree.search("search"), [
+    { page: 1, positions: [4, 20], lengths: [6, 6] },
+    { page: 2, positions: [9], lengths: [6] }
+  ]);
+  assert.equal(tree.search("sea"), null);
+  assert.equal(tree.search("missing"), null);
+});
+
+test("keeps posting lists in leaves through splits", () => {
+  const tree = new StringBTree(1);
+  for (let index = 0; index < 40; index += 1) {
+    const key = `term${String(index).padStart(2, "0")}`;
+    tree.insert(key, { page: 3, position: index, end: index + key.length });
+    tree.insert(key, { page: 3, position: index + 100, end: index + 100 + key.length });
+  }
+
+  const visit = (node) => {
+    if (node.isLeaf) {
+      assert.ok(Array.isArray(node.postings));
+      for (let index = 0; index < node.numKeys; index += 1) {
+        assert.ok(Array.isArray(node.postings[index]));
+      }
+      return;
+    }
+    assert.equal(node.postings, null);
+    for (let index = 0; index <= node.numKeys; index += 1) {
+      visit(node.pointers[index]);
+    }
+  };
+  visit(tree.root);
+
+  for (let index = 0; index < 40; index += 1) {
+    const key = `term${String(index).padStart(2, "0")}`;
+    assert.deepEqual(tree.search(key), [
+      { page: 3, positions: [index, index + 100], lengths: [key.length, key.length] }
+    ]);
+  }
+});
+
+test("serializes keys and child pointers, with postings only in leaves", () => {
+  const tree = new StringBTree(1);
+  for (let index = 0; index < 12; index += 1) {
+    const key = `term${String(index).padStart(2, "0")}`;
+    tree.insert(key, { page: 2, position: index, end: index + key.length });
+  }
+
+  const serialized = JSON.parse(JSON.stringify(tree.serialize()));
+  assert.equal(serialized.order, 1);
+
+  const visit = (node) => {
+    assert.equal(node.keys.length, node.numKeys);
+    if (node.isLeaf) {
+      assert.equal(node.pointers.length, 0);
+      assert.equal(node.postings.length, node.numKeys);
+      return;
+    }
+    assert.equal(Object.hasOwn(node, "postings"), false);
+    assert.equal(node.pointers.length, node.numKeys + 1);
+    for (const child of node.pointers) visit(child);
+  };
+  visit(serialized.root);
+  assert.deepEqual(serialized.root.keys, tree.root.keys.slice(0, tree.root.numKeys));
+});
+
+test("deserializes serialized leaf posting lists for exact search", () => {
+  const tree = new StringBTree(1);
+  for (let index = 0; index < 12; index += 1) {
+    const key = `term${String(index).padStart(2, "0")}`;
+    tree.insert(key, { page: 2, position: index, end: index + key.length });
+    tree.insert(key, { page: 2, position: index + 20, end: index + 20 + key.length });
+  }
+
+  const restored = StringBTree.deserialize(JSON.parse(JSON.stringify(tree.serialize())));
+  for (let index = 0; index < 12; index += 1) {
+    const key = `term${String(index).padStart(2, "0")}`;
+    assert.deepEqual(restored.search(key), tree.search(key));
+  }
+  assert.equal(restored.search("not-found"), null);
+  assert.notEqual(restored.root, tree.root);
+});
+
+test("retains original match length when normalization changes its length", () => {
+  const tree = new StringBTree(2);
+  tree.insert("i\u0307", { page: 1, position: 12, end: 13 });
+
+  assert.deepEqual(tree.search("i\u0307"), [
+    { page: 1, positions: [12], lengths: [1] }
+  ]);
+});

@@ -1,0 +1,4 @@
+// using this file to store the learnings in learning node
+
+1.we have readFile in node:fs module
+2.we have EventEmitter in node:events module
