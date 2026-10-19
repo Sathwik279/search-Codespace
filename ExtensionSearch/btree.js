@@ -6,6 +6,7 @@ class Node {
         this.pointers = new Array(2 * order + 2).fill(null);
         this.isLeaf = isLeaf;
         this.numKeys = 0;
+        this.nextLeaf = null;
     }
 }
 
@@ -98,7 +99,8 @@ class StringBTree {
             let upMid = Math.floor(node.numKeys / 2);
             let newRoot = this.initNode(node.keys[upMid], false);
             let newSibling = this.initNodeFromSlice(node, upMid, 2 * this.order, true);
-
+            newSibling.nextLeaf = node.nextLeaf;
+            node.nextLeaf = newSibling;
             this.cleanUpStale(node, upMid, 2 * this.order);
             node.numKeys = upMid;
             newRoot.pointers[0] = currNode;
@@ -124,6 +126,8 @@ class StringBTree {
             let upMid = Math.floor(node.numKeys / 2);
             let newSibling = this.initNodeFromSlice(node, upMid, 2 * this.order, true);
             newSibling.isLeaf = true;
+            newSibling.nextLeaf = node.nextLeaf;
+            node.nextLeaf = newSibling;
             this.cleanUpStale(node, upMid, 2 * this.order);
 
             node.numKeys = upMid;
@@ -205,6 +209,7 @@ class StringBTree {
                         .map(serializeNode)
             };
             if (node.isLeaf) {
+                serializedNode.nextLeaf = node.next === null ? null : node.next.keys[0];
                 serializedNode.postings = node.postings
                     .slice(0, node.numKeys)
                     .map((postingList) => postingList.map((posting) => ({
@@ -233,12 +238,21 @@ class StringBTree {
 
         const tree = new StringBTree(data.order);
         if (data.root !== null) {
-            tree.root = StringBTree._deserializeNode(data.root, data.order);
+            const leaves = [];
+            tree.root = StringBTree._deserializeNode(data.root, data.order, leaves);
+            for (let index = 0; index < leaves.length; index += 1) {
+                const { node, nextLeaf } = leaves[index];
+                const expectedNextKey = leaves[index + 1]?.node.keys[0] ?? null;
+                if (nextLeaf !== undefined && nextLeaf !== expectedNextKey) {
+                    throw new TypeError("Stored B-tree leaf links are invalid.");
+                }
+                node.next = leaves[index + 1]?.node ?? null;
+            }
         }
         return tree;
     }
 
-    static _deserializeNode(data, order) {
+    static _deserializeNode(data, order, leaves) {
         if (
             !data ||
             typeof data.isLeaf !== "boolean" ||
@@ -266,6 +280,13 @@ class StringBTree {
         }
 
         if (data.isLeaf) {
+            if (
+                Object.hasOwn(data, "nextLeaf") &&
+                data.nextLeaf !== null &&
+                (typeof data.nextLeaf !== "string" || data.nextLeaf.length === 0)
+            ) {
+                throw new TypeError("Stored B-tree leaf links are invalid.");
+            }
             if (
                 !Array.isArray(data.postings) ||
                 data.postings.length !== data.numKeys ||
@@ -297,12 +318,13 @@ class StringBTree {
                     lengths: posting.lengths.slice()
                 }))
             );
+            leaves.push({ node, nextLeaf: data.nextLeaf });
         } else {
-            if (Object.hasOwn(data, "postings")) {
-                throw new TypeError("Stored internal B-tree nodes cannot have postings.");
+            if (Object.hasOwn(data, "postings") || Object.hasOwn(data, "nextLeaf")) {
+                throw new TypeError("Stored internal B-tree nodes cannot have leaf data.");
             }
             node.pointers = data.pointers.map((child) =>
-                StringBTree._deserializeNode(child, order)
+                StringBTree._deserializeNode(child, order, leaves)
             );
         }
 

@@ -89,6 +89,52 @@ test("deserializes serialized leaf posting lists for exact search", () => {
   assert.notEqual(restored.root, tree.root);
 });
 
+test("serializes and restores leaf next links", () => {
+  const tree = new StringBTree(1);
+  for (let index = 0; index < 20; index += 1) {
+    tree.insert(`term${String(index).padStart(2, "0")}`);
+  }
+
+  const collectLeaves = (node, leaves = []) => {
+    if (node.isLeaf) {
+      leaves.push(node);
+      return leaves;
+    }
+    for (let index = 0; index <= node.numKeys; index += 1) {
+      collectLeaves(node.pointers[index], leaves);
+    }
+    return leaves;
+  };
+  const collectSerializedLeaves = (node, leaves = []) => {
+    if (node.isLeaf) {
+      leaves.push(node);
+      return leaves;
+    }
+    for (const child of node.pointers) collectSerializedLeaves(child, leaves);
+    return leaves;
+  };
+
+  const serialized = JSON.parse(JSON.stringify(tree.serialize()));
+  const restored = StringBTree.deserialize(serialized);
+  const originalLeaves = collectLeaves(tree.root);
+  const restoredLeaves = collectLeaves(restored.root);
+  const serializedLeaves = collectSerializedLeaves(serialized.root);
+
+  assert.ok(originalLeaves.length > 1);
+  assert.deepEqual(
+    serializedLeaves.map((leaf) => leaf.nextLeaf),
+    originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
+  );
+  assert.deepEqual(
+    originalLeaves.map((leaf) => leaf.next?.keys[0] ?? null),
+    originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
+  );
+  assert.deepEqual(
+    restoredLeaves.map((leaf) => leaf.next?.keys[0] ?? null),
+    originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
+  );
+});
+
 test("retains original match length when normalization changes its length", () => {
   const tree = new StringBTree(2);
   tree.insert("i\u0307", { page: 1, position: 12, end: 13 });
