@@ -16,11 +16,11 @@ class StringBTree {
         this.root = null;
     }
 
-    // Binary search to find the correct insertion or traversal index
-    findIdx(start, end, insVal, keys) {
+    // Returns the first index whose key is greater than or equal to the search value.
+    lowerBound(start, end, searchVal, keys) {
         while (start <= end) {
-            let mid = Math.floor(start + (end - start) / 2);
-            if (keys[mid] <= insVal) {
+            const mid = Math.floor(start + (end - start) / 2);
+            if (keys[mid] < searchVal) {
                 start = mid + 1;
             } else {
                 end = mid - 1;
@@ -51,7 +51,9 @@ class StringBTree {
     }
 
     insertIntoNode(node, insVal, insertionIdx, pointer, posting = null) {
-        let idx = insertionIdx === -1 ? this.findIdx(0, node.numKeys - 1, insVal, node.keys) : insertionIdx;
+        let idx = insertionIdx === -1
+            ? this.lowerBound(0, node.numKeys - 1, insVal, node.keys)
+            : insertionIdx;
 
         for (let i = node.numKeys - 1; i >= idx; i--) {
             node.keys[i + 1] = node.keys[i];
@@ -85,9 +87,9 @@ class StringBTree {
 
         // Root is leaf and needs splitting
         if (node.isLeaf && this.root === currNode) {
-            let idx = this.findIdx(0, node.numKeys - 1, insVal, node.keys);
-            if (idx > 0 && node.keys[idx - 1] === insVal) {
-                this._appendPosting(node.postings[idx - 1], posting, insVal.length);
+            let idx = this.lowerBound(0, node.numKeys - 1, insVal, node.keys);
+            if (idx < node.numKeys && node.keys[idx] === insVal) {
+                this._appendPosting(node.postings[idx], posting, insVal.length);
                 return { retInsVal: null, retNode: null };
             }
             if (node.numKeys < 2 * this.order) {
@@ -112,9 +114,9 @@ class StringBTree {
 
         // General leaf node insertion
         if (node.isLeaf) {
-            let idx = this.findIdx(0, node.numKeys - 1, insVal, node.keys);
-            if (idx > 0 && node.keys[idx - 1] === insVal) {
-                this._appendPosting(node.postings[idx - 1], posting, insVal.length);
+            let idx = this.lowerBound(0, node.numKeys - 1, insVal, node.keys);
+            if (idx < node.numKeys && node.keys[idx] === insVal) {
+                this._appendPosting(node.postings[idx], posting, insVal.length);
                 return { retInsVal: null, retNode: null };
             }
             if (node.numKeys < 2 * this.order) {
@@ -135,7 +137,10 @@ class StringBTree {
         }
 
         // Internal node recursive traversal & splitting
-        let recIdx = this.findIdx(0, node.numKeys - 1, insVal, node.keys);
+        let recIdx = this.lowerBound(0, node.numKeys - 1, insVal, node.keys);
+        if (recIdx < node.numKeys && node.keys[recIdx] === insVal) {
+            recIdx += 1;
+        }
         let res = this._insert(node.pointers[recIdx], insVal, posting);
         let retInsVal = res.retInsVal;
         let retNode = res.retNode;
@@ -181,17 +186,49 @@ class StringBTree {
     search(key) {
         let curr = this.root;
         while (curr !== null) {
-            let idx = this.findIdx(0, curr.numKeys - 1, key, curr.keys);
+            let idx = this.lowerBound(0, curr.numKeys - 1, key, curr.keys);
             if (curr.isLeaf) {
-                let keyIdx = idx - 1;
-                if (keyIdx >= 0 && curr.keys[keyIdx] === key) {
-                    return curr.postings[keyIdx];
+                if (idx < curr.numKeys && curr.keys[idx] === key) {
+                    return curr.postings[idx];
                 }
                 return null;
+            }
+            if (idx < curr.numKeys && curr.keys[idx] === key) {
+                idx += 1;
             }
             curr = curr.pointers[idx];
         }
         return null;
+    }
+
+    prefixSearch(prefix) {
+        if (typeof prefix !== "string") {
+            throw new TypeError("Prefix must be a string.");
+        }
+
+        let curr = this.root;
+        while (curr !== null && !curr.isLeaf) {
+            let idx = this.lowerBound(0, curr.numKeys - 1, prefix, curr.keys);
+            if (idx < curr.numKeys && curr.keys[idx] === prefix) {
+                idx += 1;
+            }
+            curr = curr.pointers[idx];
+        }
+        if (curr === null) return [];
+
+        let keyIdx = this.lowerBound(0, curr.numKeys - 1, prefix, curr.keys);
+
+        const matches = [];
+        while (curr !== null) {
+            for (let index = keyIdx; index < curr.numKeys; index += 1) {
+                const key = curr.keys[index];
+                if (!key.startsWith(prefix)) return matches;
+                matches.push({ key, postings: curr.postings[index] });
+            }
+            curr = curr.nextLeaf;
+            keyIdx = 0;
+        }
+        return matches;
     }
 
     serialize() {
@@ -209,7 +246,7 @@ class StringBTree {
                         .map(serializeNode)
             };
             if (node.isLeaf) {
-                serializedNode.nextLeaf = node.next === null ? null : node.next.keys[0];
+                serializedNode.nextLeaf = node.nextLeaf === null ? null : node.nextLeaf.keys[0];
                 serializedNode.postings = node.postings
                     .slice(0, node.numKeys)
                     .map((postingList) => postingList.map((posting) => ({
@@ -246,7 +283,7 @@ class StringBTree {
                 if (nextLeaf !== undefined && nextLeaf !== expectedNextKey) {
                     throw new TypeError("Stored B-tree leaf links are invalid.");
                 }
-                node.next = leaves[index + 1]?.node ?? null;
+                node.nextLeaf = leaves[index + 1]?.node ?? null;
             }
         }
         return tree;

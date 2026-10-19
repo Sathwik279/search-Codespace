@@ -91,8 +91,12 @@ test("deserializes serialized leaf posting lists for exact search", () => {
 
 test("serializes and restores leaf next links", () => {
   const tree = new StringBTree(1);
-  for (let index = 0; index < 20; index += 1) {
-    tree.insert(`term${String(index).padStart(2, "0")}`);
+  const keys = [
+    "app", "apple", "application", "apply", "apt",
+    "banana", "band", "bandana", "cat", "dog"
+  ];
+  for (const [index, key] of keys.entries()) {
+    tree.insert(key, { page: 1, position: index });
   }
 
   const collectLeaves = (node, leaves = []) => {
@@ -126,13 +130,21 @@ test("serializes and restores leaf next links", () => {
     originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
   );
   assert.deepEqual(
-    originalLeaves.map((leaf) => leaf.next?.keys[0] ?? null),
+    originalLeaves.map((leaf) => leaf.nextLeaf?.keys[0] ?? null),
     originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
   );
   assert.deepEqual(
-    restoredLeaves.map((leaf) => leaf.next?.keys[0] ?? null),
+    restoredLeaves.map((leaf) => leaf.nextLeaf?.keys[0] ?? null),
     originalLeaves.slice(1).map((leaf) => leaf.keys[0]).concat(null)
   );
+
+  for (const prefix of ["app", "ban", "band", "z", ""]) {
+    const expected = keys
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => ({ key, postings: tree.search(key) }));
+    assert.deepEqual(tree.prefixSearch(prefix), expected);
+    assert.deepEqual(restored.prefixSearch(prefix), expected);
+  }
 });
 
 test("retains original match length when normalization changes its length", () => {
