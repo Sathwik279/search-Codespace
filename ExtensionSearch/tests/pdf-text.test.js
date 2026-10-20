@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { extractPageText } = require("../pdf-text.js");
-const StringBTree = require("../btree.js");
+const StringBTree = require("../indexes/btree.js");
 
 test("joins a word hyphenated across a PDF line break", () => {
   const items = [

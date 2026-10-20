@@ -57,47 +57,31 @@ function updateDocumentInfo(title, url) {
 }
 
 async function initializeIndex(pageTexts, documentInfo, loadId) {
-  const nextIndex = new StringBTree(2);
-  const wordPattern = /[\p{L}\p{N}]+/gu;
-  let indexedWordCount = 0;
-  let extractedLength = 0;
-
-  for (let pageIndex = 0; pageIndex < pageTexts.length; pageIndex += 1) {
-    const pageText = pageTexts[pageIndex];
-    extractedLength += pageText.length;
-    if (pageIndex > 0) extractedLength += 2;
-    for (const match of pageText.matchAll(wordPattern)) {
-      nextIndex.insert(match[0].toLocaleLowerCase(), {
-        page: pageIndex + 1,
-        position: match.index,
-        end: match.index + match[0].length
-      });
-      indexedWordCount += 1;
-
-      if (indexedWordCount % 25000 === 0) {
-        setStatus(
-          `Indexing page ${pageIndex + 1} of ${pageTexts.length} · ${indexedWordCount.toLocaleString()} words`,
-          "loading"
-        );
-        await new Promise((resolve) => setTimeout(resolve, 0));
-        if (loadId !== currentLoadId) return false;
-      }
-    }
-  }
+  const buildResult = await SearchIndexBuilder.build(pageTexts, {
+    onProgress: async ({ pageNumber, totalPages, indexedWordCount }) => {
+      setStatus(
+        `Indexing page ${pageNumber} of ${totalPages} · ${indexedWordCount.toLocaleString()} words`,
+        "loading"
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    isCancelled: () => loadId !== currentLoadId
+  });
+  if (buildResult === null) return false;
 
   await DocumentIndexStorage.saveDocument({
     url: documentInfo.url,
     title: documentInfo.title,
     pageTexts,
-    index: nextIndex.serialize(),
+    index: buildResult.index.serialize(),
     updatedAt: Date.now(),
     version: DOCUMENT_INDEX_VERSION
   });
 
   if (loadId !== currentLoadId) return false;
-  extractedCharacterCount = extractedLength;
+  extractedCharacterCount = buildResult.extractedCharacterCount;
   indexedPages = pageTexts;
-  invertedIndex = nextIndex;
+  invertedIndex = buildResult.index;
   return true;
 }
 
@@ -121,83 +105,9 @@ function restoreIndex(record, loadId) {
   return true;
 }
 
-async function searchIndex(query) {
-  const queryTokens = Array.from(
-    query.toLocaleLowerCase().matchAll(/[\p{L}\p{N}]+/gu),
-    (match) => match[0]
-  );
-  if (queryTokens.length === 0) return [];
-
-  const uniqueQueryTokens = new Set(queryTokens);
-  const pages = new Map();
-  for (const queryToken of uniqueQueryTokens) {
-    const matchingTerms = invertedIndex.prefixSearch(queryToken);
-    for (const matchingTerm of matchingTerms) {
-      for (const pagePostings of matchingTerm.postings) {
-        if (
-          !Array.isArray(pagePostings.positions) ||
-          !Array.isArray(pagePostings.lengths) ||
-          pagePostings.positions.length !== pagePostings.lengths.length
-        ) continue;
-        let pageResult = pages.get(pagePostings.page);
-        if (!pageResult) {
-          pageResult = {
-            page: pagePostings.page,
-            matchedTerms: new Set(),
-            occurrences: new Map()
-          };
-          pages.set(pagePostings.page, pageResult);
-        }
-        pageResult.matchedTerms.add(queryToken);
-        for (let postingIndex = 0; postingIndex < pagePostings.positions.length; postingIndex += 1) {
-          const position = pagePostings.positions[postingIndex];
-          const occurrence = pageResult.occurrences.get(position);
-          if (occurrence) {
-            occurrence.terms.add(matchingTerm.key);
-          } else {
-            pageResult.occurrences.set(position, {
-              position,
-              end: position + pagePostings.lengths[postingIndex],
-              terms: new Set([matchingTerm.key])
-            });
-          }
-        }
-      }
-    }
-  }
-
-  return Array.from(pages.values())
-    .map((result) => {
-      const pageText = indexedPages[result.page - 1] || "";
-      const occurrences = Array.from(result.occurrences.values())
-        .sort((a, b) => a.position - b.position)
-        .map((occurrence) => {
-          const snippetStart = Math.max(0, occurrence.position - 70);
-          const snippetEnd = Math.min(pageText.length, occurrence.end + 70);
-          const snippet = pageText.slice(snippetStart, snippetEnd);
-          return {
-            snippet,
-            leadingEllipsis: snippetStart > 0,
-            trailingEllipsis: snippetEnd < pageText.length,
-            matchStart: occurrence.position - snippetStart,
-            matchEnd: occurrence.end - snippetStart,
-            position: occurrence.position,
-            terms: Array.from(occurrence.terms).sort()
-          };
-        });
-      return {
-        page: result.page,
-        score: result.matchedTerms.size / uniqueQueryTokens.size,
-        occurrenceCount: occurrences.length,
-        occurrences
-      };
-    })
-    .sort((a, b) => a.page - b.page);
-}
-
 function renderResults(results) {
   if (!Array.isArray(results)) {
-    throw new TypeError("searchIndex(query) must return an array of result objects.");
+    throw new TypeError("Search results must be an array of result objects.");
   }
 
   resultsElement.replaceChildren();
@@ -239,9 +149,7 @@ function renderResults(results) {
     count.textContent = `${result.occurrenceCount} ${
       result.occurrenceCount === 1 ? "occurrence" : "occurrences"
     }`;
-    const score = document.createElement("span");
-    score.textContent = `${Math.round(result.score * 100)}% match`;
-    metadata.append(page, count, score);
+    metadata.append(page, count);
     summary.append(metadata);
     card.append(summary);
 
@@ -302,7 +210,7 @@ async function runSearch(rawQuery, persist = true) {
   }
 
   try {
-    const results = await searchIndex(query);
+    const results = SearchQueryExecutor.search(invertedIndex, indexedPages, query);
     if (searchId !== currentSearchId || loadId !== currentLoadId) return;
     renderResults(results);
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);

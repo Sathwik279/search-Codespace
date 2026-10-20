@@ -1,6 +1,6 @@
 class Node {
     constructor(isLeaf = true, order = 2) {
-        // Size is 2*order + 1 to handle overflow before splitting
+        // Allocate one extra key slot so a node can overflow before splitting.
         this.keys = new Array(2 * order + 1).fill(null);
         this.postings = isLeaf ? new Array(2 * order + 1).fill(null) : null;
         this.pointers = new Array(2 * order + 2).fill(null);

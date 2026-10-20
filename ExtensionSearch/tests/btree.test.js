@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const StringBTree = require("../btree.js");
+const StringBTree = require("../indexes/btree.js");
 
 test("groups repeated term positions by page", () => {
   const tree = new StringBTree(2);

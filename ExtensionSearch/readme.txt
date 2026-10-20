@@ -53,21 +53,39 @@ pdf-text.js
 popup.js
   Coordinates active-tab detection, PDF or webpage text extraction, and the
   index/search flow. It restores a stored tree when available; otherwise it
-  tokenizes each page into lowercase Unicode letter/number words and stores
-  positions grouped by term and page in a StringBTree. Indexing yields to the
-  UI periodically and persists the tree without concatenating a second copy
-  of the full document text. It validates search results and renders snippets
-  with textContent.
+  asks SearchIndexBuilder to build and persist an index. It validates results
+  from SearchQueryExecutor and renders snippets with textContent.
   `currentSearchId` prevents an older asynchronous search from replacing the
   results for newer input.
 
-btree.js
+search/tokenizer.js
+  Normalizes document tokens and query tokens consistently. Document tokens
+  include their original character offsets and lengths.
+
+search/index-builder.js
+  Builds a StringBTree from page text using SearchTokenizer. It groups each
+  token's positions by page and reports progress so the UI can yield during
+  large indexing jobs. It returns the in-memory index and character/word
+  counts; popup.js owns persistence and cancellation.
+
+search/query-executor.js
+  Expands each query token with the index's prefixSearch method, combines
+  postings into page/occurrence results, and builds context snippets. It does
+  not rank results; pages are returned in ascending page-number order.
+
+indexes/
+  Contains the individual search-index implementations. Currently it contains
+  btree.js; future phrase, bigram, or k-gram indexes can be added here as
+  separate implementations.
+
+indexes/btree.js
   Defines StringBTree and its node structure. The configurable order controls
   the maximum number of keys per node (2 * order). Insertion keeps string keys
   sorted, groups each term's positions and match lengths by page, and splits
   overflowing nodes. `search(key)` returns page/position groups for an exact
-  key or null. `serialize()` and `StringBTree.deserialize(data)` convert the
-  in-memory tree to and from a structured-cloneable representation for IndexedDB.
+  key; `prefixSearch(prefix)` returns matching terms and their postings.
+  `serialize()` and `StringBTree.deserialize(data)` convert the in-memory tree
+  to and from a structured-cloneable representation for IndexedDB.
 
 index-storage.js
   Stores each document's page text and serialized B-tree in the extension's
@@ -118,12 +136,13 @@ Extraction flow
 
 Custom index and search hooks
 -----------------------------
-The hooks are in popup.js:
+The search pipeline is split across search/tokenizer.js,
+search/index-builder.js, search/query-executor.js, and popup.js:
 
 Index initialization
-  After a cache miss or explicit refresh, each page is tokenized into
-  lowercase Unicode letters and numbers. Punctuation separates words; no stop
-  words are removed. Occurrences are grouped as
+  After a cache miss or explicit refresh, SearchIndexBuilder tokenizes each
+  page into lowercase Unicode letters and numbers through SearchTokenizer.
+  Punctuation separates words; no stop words are removed. Occurrences are grouped as
   `{ page, positions, lengths }`; offsets refer to the reconstructed searchable
   page string and lengths preserve the original token boundaries. A word joined across a PDF
   line-ending hyphen is indexed as the complete word. OCR words encoded with
@@ -131,23 +150,19 @@ Index initialization
   ordinary webpage text is indexed as page 1. The page strings and serialized
   B-tree are written to IndexedDB before the search input is enabled.
 
-`searchIndex(query)`
-  Called whenever the search field changes. It may return synchronously or
-  asynchronously and resolves to result objects shaped like:
-
-    [
-      { snippet: "A matching passage from the document", page: 2, score: 0.91 },
-      { snippet: "Another matching passage" }
-    ]
+`SearchQueryExecutor.search(index, pageTexts, query)`
+  Called by popup.js whenever the search field changes. It returns page result
+  objects containing the page number, occurrence count, and occurrence snippets.
 
   Query words are normalized the same way as indexed words. Each query token
-  uses an exact B-tree lookup, so partial words do not match longer indexed
-  words. Results are grouped by page and displayed in ascending page-number
-  order. Each page result is an expandable section showing that page's
-  occurrence count and one separate context snippet for every matching word
-  occurrence. Occurrences are shown in text order with their extracted-text
-  offset and matched term. The results header displays both the number of
-  matching pages and the total occurrences across those pages.
+  uses B-tree prefix search, so a query such as `app` matches indexed terms
+  such as `apple` and `application`. Results are grouped by page and displayed
+  in ascending page-number order; no ranking is applied. Each page result is
+  an expandable section showing that page's occurrence count and one separate
+  context snippet for every matching word occurrence. Occurrences are shown
+  in text order with their extracted-text offset and matched term. The results
+  header displays both the number of matching pages and the total occurrences
+  across those pages.
 
   Page labels are the PDF page positions (for example, PDF page 3 of the file),
   not a printed page number from the document footer. PDF.js may extract
@@ -206,8 +221,9 @@ Load and test in Chrome
 2. Select "Load unpacked" and choose the ExtensionSearch folder. On Chrome
    114+, the extension action opens the side panel.
 3. Open a text-based webpage or PDF in a tab and click the extension icon.
-4. Wait for the status to say the index is saved, then enter one or more exact words.
-   Results show a snippet, page, and match score.
+4. Wait for the status to say the index is saved, then enter one or more word
+   prefixes. Results show matching pages and occurrence snippets; results are
+   not ranked.
 5. Close and reopen the side panel for that document to restore the saved
    index and previous search. Use the refresh icon to rebuild after the source
    document changes.
