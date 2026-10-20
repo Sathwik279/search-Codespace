@@ -8,11 +8,11 @@ text from the active tab. PDF files are downloaded from their tab URL and
 parsed locally with PDF.js, avoiding dependence on Chrome's built-in PDF
 viewer DOM. Other HTTP(S) webpages are read by an injected content script.
 
-The extension builds an in-memory String B-tree inverted index and persists
-the serialized tree, page text, and last search term in IndexedDB. Reopening
-the side panel for the same document restores its index without extracting or
-tokenizing the document again. A refresh button explicitly rebuilds the saved
-index.
+The extension builds an in-memory term B-tree and permuterm B-tree, then
+persists both serialized indexes, page text, and the last search term in
+IndexedDB. Reopening the side panel for the same document restores its indexes
+without extracting or tokenizing the document again. A refresh button
+explicitly rebuilds the saved indexes.
 
 Files
 -----
@@ -59,38 +59,48 @@ popup.js
   results for newer input.
 
 search/tokenizer.js
-  Normalizes document tokens and query tokens consistently. Document tokens
-  include their original character offsets and lengths.
+  Splits document text and queries into ASCII letters and digits, and
+  lowercases them consistently. Each document token includes its zero-based
+  character position and zero-based token ordinal within its page.
 
 search/index-builder.js
   Builds a StringBTree from page text using SearchTokenizer. It groups each
-  token's positions by page and reports progress so the UI can yield during
-  large indexing jobs. It returns the in-memory index and character/word
-  counts; popup.js owns persistence and cancellation.
+  token's character positions and ordinals by page and reports progress so the
+  UI can yield during large indexing jobs. It returns the in-memory index and
+  character/word counts; popup.js owns persistence and cancellation.
 
 search/query-executor.js
-  Expands each query token with the index's prefixSearch method, combines
-  postings into page/occurrence results, and builds context snippets. It does
-  not rank results; pages are returned in ascending page-number order.
+  Resolves prefix and one-star wildcard query tokens to terms, fetches their
+  postings from the term index, checks phrase adjacency, and builds context
+  snippets. It does not rank results; pages are returned in ascending
+  page-number order.
 
 indexes/
   Contains the individual search-index implementations. Currently it contains
-  btree.js; future phrase, bigram, or k-gram indexes can be added here as
-  separate implementations.
+  btree.js and permuterm-index.js. Phrase matching uses the term B-tree
+  postings' token ordinals. The permuterm index resolves one-star wildcard
+  patterns to candidate terms; the term B-tree then supplies their postings.
+  Future bigram or k-gram indexes can be added here as separate implementations.
 
 indexes/btree.js
   Defines StringBTree and its node structure. The configurable order controls
   the maximum number of keys per node (2 * order). Insertion keeps string keys
-  sorted, groups each term's positions and match lengths by page, and splits
-  overflowing nodes. `search(key)` returns page/position groups for an exact
-  key; `prefixSearch(prefix)` returns matching terms and their postings.
-  `serialize()` and `StringBTree.deserialize(data)` convert the in-memory tree
-  to and from a structured-cloneable representation for IndexedDB.
+  sorted, groups each term's character positions and token ordinals by page,
+  and splits overflowing nodes. `search(key)` returns page posting groups for
+  an exact key; `prefixSearch(prefix)` returns matching terms and their
+  postings. `serialize()` and `StringBTree.deserialize(data)` convert the
+  in-memory tree to and from a structured-cloneable representation for IndexedDB.
+
+indexes/permuterm-index.js
+  Stores every unique term's rotations with a `$` end marker in a separate
+  StringBTree and keeps a rotation-to-original-term mapping. It supports prefix
+  lookup over permuterms, serializes both the tree and mapping, and restores
+  them together.
 
 index-storage.js
-  Stores each document's page text and serialized B-tree in the extension's
-  IndexedDB database. It separately stores the last search term by document
-  URL so typing a query does not rewrite the full index.
+  Stores each document's page text and serialized term and permuterm indexes in
+  the extension's IndexedDB database. It separately stores the last search
+  term by document URL so typing a query does not rewrite the indexes.
 
 pdfjs/
   Contains the locally bundled PDF.js 3.11.174 library (`pdf.min.js`), its
@@ -105,7 +115,7 @@ Extraction flow
    local file URLs ending in `.pdf` are accepted.
 3. The document URL without its fragment is used as its IndexedDB cache key.
    Unless the user requests a refresh, the extension first checks IndexedDB
-   for saved page text and a serialized B-tree. A valid saved tree is restored
+   for saved page text and serialized indexes. Valid saved indexes are restored
    and the saved search term is reapplied without extracting or tokenizing.
 4. If no saved index exists, a URL whose path ends in `.pdf` is treated as a
    PDF. For other HTTP(S) URLs,
@@ -125,10 +135,10 @@ Extraction flow
 7. For a non-PDF HTTP(S) page, the side panel asks background.js to inject
    content.js and return text exposed in the page DOM.
 8. On success, each page string is tokenized. For every term the tree stores
-   its 1-based page number and arrays of character start offsets and original
-   match lengths, grouped by page. Indexing yields periodically so the side
+   its 1-based page number and arrays of character start offsets and token
+   ordinals, grouped by page. Indexing yields periodically so the side
    panel can update progress and remain responsive. The page text and
-   serialized tree are saved in IndexedDB, and the search field is enabled.
+   serialized indexes are saved in IndexedDB, and the search field is enabled.
    On failure, the panel shows an error.
 9. Typing searches the restored or current tree and saves the last query for
    that document. The toolbar button opens the side panel; the refresh button
@@ -141,49 +151,50 @@ search/index-builder.js, search/query-executor.js, and popup.js:
 
 Index initialization
   After a cache miss or explicit refresh, SearchIndexBuilder tokenizes each
-  page into lowercase Unicode letters and numbers through SearchTokenizer.
-  Punctuation separates words; no stop words are removed. Occurrences are grouped as
-  `{ page, positions, lengths }`; offsets refer to the reconstructed searchable
-  page string and lengths preserve the original token boundaries. A word joined across a PDF
-  line-ending hyphen is indexed as the complete word. OCR words encoded with
-  spaces between letters are also reconstructed. PDF page numbers start at 1;
-  ordinary webpage text is indexed as page 1. The page strings and serialized
-  B-tree are written to IndexedDB before the search input is enabled.
+  page into lowercase ASCII letters and digits through SearchTokenizer.
+  Punctuation and non-ASCII characters separate tokens; no stop words are
+  removed. Each occurrence has a zero-based character position and a zero-based
+  token ordinal on its page. The term key itself supplies the match length
+  because indexed terms contain only ASCII letters and digits. A word joined
+  across a PDF line-ending hyphen is indexed as the complete word. OCR words
+  encoded with spaces between ASCII letters are also reconstructed. PDF page
+  numbers start at 1; ordinary webpage text is indexed as page 1. The page
+  strings and serialized term and permuterm indexes are written to IndexedDB
+  before the search input is enabled.
 
 Posting storage walkthrough
 ---------------------------
-The index builder creates one intermediate occurrence object for every token.
+The index builder creates one intermediate token object for every token.
 For the page text `the cat and the cat`, tokenization produces:
 
-  `the` -> { term: "the", position: 0,  end: 3 }
-  `cat` -> { term: "cat", position: 4,  end: 7 }
-  `and` -> { term: "and", position: 8,  end: 11 }
-  `the` -> { term: "the", position: 12, end: 15 }
-  `cat` -> { term: "cat", position: 16, end: 19 }
+  `the` -> { term: "the", position: 0,  ordinal: 0 }
+  `cat` -> { term: "cat", position: 4,  ordinal: 1 }
+  `and` -> { term: "and", position: 8,  ordinal: 2 }
+  `the` -> { term: "the", position: 12, ordinal: 3 }
+  `cat` -> { term: "cat", position: 16, ordinal: 4 }
 
 The builder passes each occurrence to the B-tree as the key and a posting input:
 
   index.insert(token.term, {
     page: pageIndex + 1,
     position: token.position,
-    end: token.end
+    ordinal: token.ordinal
   });
 
 For example, the two `the` occurrences are passed separately:
 
-  insert("the", { page: 1, position: 0,  end: 3 })
-  insert("the", { page: 1, position: 12, end: 15 })
+  insert("the", { page: 1, position: 0,  ordinal: 0 })
+  insert("the", { page: 1, position: 12, ordinal: 3 })
 
 The B-tree finds the leaf slot for `"the"` and appends both occurrences to
-that term's posting list. `_appendPosting()` converts each exclusive `end`
-offset into a length (`end - position`), so the stored page posting becomes:
+that term's posting list. The stored page posting becomes:
 
   key "the"
       |
       v
   node.postings[the-key-slot]
       |
-      +-- [ { page: 1, positions: [0, 12], lengths: [3, 3] } ]
+      +-- [ { page: 1, positions: [0, 12], ordinals: [0, 3] } ]
 
 The same process for `"cat"` produces:
 
@@ -192,26 +203,26 @@ The same process for `"cat"` produces:
       v
   node.postings[cat-key-slot]
       |
-      +-- [ { page: 1, positions: [4, 16], lengths: [3, 3] } ]
+      +-- [ { page: 1, positions: [4, 16], ordinals: [1, 4] } ]
 
 The complete leaf storage is conceptually nested like this (keys are kept in
 sorted order, so the actual slot numbers depend on the node):
 
   node.keys
-      [ "and"                 | "cat"                                  | "the"                                  ]
+      [ "and"                                      | "cat"                                       | "the"                                       ]
              |                       |                                        |
              v                       v                                        v
   node.postings
-      [ [ { page: 1, ... } ] | [ { page: 1, positions: [4,16], ... } ] | [ { page: 1, positions: [0,12], ... } ] ]
+      [ [ { page: 1, ... } ] | [ { page: 1, positions: [4,16], ordinals: [1,4] } ] | [ { page: 1, positions: [0,12], ordinals: [0,3] } ] ]
         ^                       ^                                        ^
         posting list for and    posting list for cat                     posting list for the
 
 More explicitly, the shape is:
 
   node.postings = [
-    [ { page: 1, positions: [8],      lengths: [3] } ],  // node.keys[0] = "and"
-    [ { page: 1, positions: [4, 16],  lengths: [3, 3] } ], // node.keys[1] = "cat"
-    [ { page: 1, positions: [0, 12],  lengths: [3, 3] } ]  // node.keys[2] = "the"
+    [ { page: 1, positions: [8],      ordinals: [2] } ],  // node.keys[0] = "and"
+    [ { page: 1, positions: [4, 16],  ordinals: [1, 4] } ], // node.keys[1] = "cat"
+    [ { page: 1, positions: [0, 12],  ordinals: [0, 3] } ]  // node.keys[2] = "the"
   ];
 
 So the bracket levels are:
@@ -219,27 +230,37 @@ So the bracket levels are:
   node.postings
     [ posting list for key 0, posting list for key 1, ... ]
         [ page posting, page posting, ... ]
-            { page, positions: [...], lengths: [...] }
+            { page, positions: [...], ordinals: [...] }
 
-`positions[i]` and `lengths[i]` describe the same occurrence. Positions are
-zero-based character offsets within that page's extracted text; lengths are
-the original token span lengths. The exclusive end is recovered as
-`positions[i] + lengths[i]`. A leaf's `node.postings[i]` belongs to
-`node.keys[i]`; internal nodes have no posting lists.
+`positions[i]` and `ordinals[i]` describe the same occurrence. Positions are
+zero-based character offsets within that page's extracted text and are used to
+create snippets. Ordinals are zero-based token positions within the page and
+are used to verify phrase adjacency. The highlight end is recovered as
+`positions[i] + node.keys[keyIndex].length`. A leaf's `node.postings[i]`
+belongs to `node.keys[i]`; internal nodes have no posting lists.
 
 `SearchQueryExecutor.search(index, pageTexts, query)`
   Called by popup.js whenever the search field changes. It returns page result
   objects containing the page number, occurrence count, and occurrence snippets.
 
-  Query words are normalized the same way as indexed words. Each query token
-  uses B-tree prefix search, so a query such as `app` matches indexed terms
-  such as `apple` and `application`. Results are grouped by page and displayed
-  in ascending page-number order; no ranking is applied. Each page result is
-  an expandable section showing that page's occurrence count and one separate
-  context snippet for every matching word occurrence. Occurrences are shown
-  in text order with their extracted-text offset and matched term. The results
-  header displays both the number of matching pages and the total occurrences
-  across those pages.
+  Query words are normalized the same way as indexed words. A single query
+  token uses B-tree prefix search, so `app` matches terms such as `apple` and
+  `application`. A multi-token query is treated as a phrase: every token must
+  match a term at the next consecutive ordinal on the same page. Each token
+  can still be a prefix of its indexed term. One `*` wildcard is supported per
+  query:   `ca*` uses ordinary term-prefix search. For a leading or middle wildcard,
+  `*at` is transformed to `at$*` and `c*t` to `t$c*`; the portion before `*`
+  is the required prefix and the portion after it is the required suffix.
+  The permuterm index supplies candidate terms, then the ordinary term index
+  supplies their page postings. Only one `*` is accepted in a query. A
+  wildcard token can participate in a
+  multi-token phrase using the same consecutive-ordinal check. Punctuation
+  between consecutive tokens does not add an ordinal. Results are grouped by
+  page and displayed in ascending page-number order; no ranking is applied.
+  Each page result is an expandable section showing its occurrence count and
+  a context snippet for each match. Phrase matches highlight from the first
+  term through the last. The results header displays matching pages and total
+  occurrences.
 
   Page labels are the PDF page positions (for example, PDF page 3 of the file),
   not a printed page number from the document footer. PDF.js may extract
@@ -298,9 +319,10 @@ Load and test in Chrome
 2. Select "Load unpacked" and choose the ExtensionSearch folder. On Chrome
    114+, the extension action opens the side panel.
 3. Open a text-based webpage or PDF in a tab and click the extension icon.
-4. Wait for the status to say the index is saved, then enter one or more word
-   prefixes. Results show matching pages and occurrence snippets; results are
-   not ranked.
+4. Wait for the status to say the index is saved, then enter a word prefix,
+   one-star wildcard pattern (`ca*`, `*at`, or `c*t`), or a multi-word phrase.
+   Phrase words may be prefixes or include the single wildcard. Results show
+   matching pages and occurrence snippets; results are not ranked.
 5. Close and reopen the side panel for that document to restore the saved
    index and previous search. Use the refresh icon to rebuild after the source
    document changes.

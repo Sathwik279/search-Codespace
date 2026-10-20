@@ -45,7 +45,7 @@
           <input
             id="search-input"
             type="search"
-            placeholder="Type word prefix(es)…"
+            placeholder="Type a prefix, wildcard, or phrase…"
             autocomplete="off"
             disabled
           >
@@ -71,6 +71,7 @@
       <footer class="footer">Your document index is saved locally on this device.</footer>
     </main>
     <script src="indexes/btree.js"></script>
+    <script src="indexes/permuterm-index.js"></script>
     <script src="search/tokenizer.js"></script>
     <script src="search/index-builder.js"></script>
     <script src="search/query-executor.js"></script>

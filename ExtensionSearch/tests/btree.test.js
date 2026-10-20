@@ -4,13 +4,13 @@ const StringBTree = require("../indexes/btree.js");
 
 test("groups repeated term positions by page", () => {
   const tree = new StringBTree(2);
-  tree.insert("search", { page: 1, position: 4, end: 10 });
-  tree.insert("search", { page: 1, position: 20, end: 26 });
-  tree.insert("search", { page: 2, position: 9, end: 15 });
+  tree.insert("search", { page: 1, position: 4, ordinal: 0 });
+  tree.insert("search", { page: 1, position: 20, ordinal: 2 });
+  tree.insert("search", { page: 2, position: 9, ordinal: 1 });
 
   assert.deepEqual(tree.search("search"), [
-    { page: 1, positions: [4, 20], lengths: [6, 6] },
-    { page: 2, positions: [9], lengths: [6] }
+    { page: 1, positions: [4, 20], ordinals: [0, 2] },
+    { page: 2, positions: [9], ordinals: [1] }
   ]);
   assert.equal(tree.search("sea"), null);
   assert.equal(tree.search("missing"), null);
@@ -20,8 +20,8 @@ test("keeps posting lists in leaves through splits", () => {
   const tree = new StringBTree(1);
   for (let index = 0; index < 40; index += 1) {
     const key = `term${String(index).padStart(2, "0")}`;
-    tree.insert(key, { page: 3, position: index, end: index + key.length });
-    tree.insert(key, { page: 3, position: index + 100, end: index + 100 + key.length });
+    tree.insert(key, { page: 3, position: index, ordinal: index });
+    tree.insert(key, { page: 3, position: index + 100, ordinal: index + 100 });
   }
 
   const visit = (node) => {
@@ -42,7 +42,7 @@ test("keeps posting lists in leaves through splits", () => {
   for (let index = 0; index < 40; index += 1) {
     const key = `term${String(index).padStart(2, "0")}`;
     assert.deepEqual(tree.search(key), [
-      { page: 3, positions: [index, index + 100], lengths: [key.length, key.length] }
+      { page: 3, positions: [index, index + 100], ordinals: [index, index + 100] }
     ]);
   }
 });
@@ -51,7 +51,7 @@ test("serializes keys and child pointers, with postings only in leaves", () => {
   const tree = new StringBTree(1);
   for (let index = 0; index < 12; index += 1) {
     const key = `term${String(index).padStart(2, "0")}`;
-    tree.insert(key, { page: 2, position: index, end: index + key.length });
+    tree.insert(key, { page: 2, position: index, ordinal: index });
   }
 
   const serialized = JSON.parse(JSON.stringify(tree.serialize()));
@@ -76,8 +76,8 @@ test("deserializes serialized leaf posting lists for exact search", () => {
   const tree = new StringBTree(1);
   for (let index = 0; index < 12; index += 1) {
     const key = `term${String(index).padStart(2, "0")}`;
-    tree.insert(key, { page: 2, position: index, end: index + key.length });
-    tree.insert(key, { page: 2, position: index + 20, end: index + 20 + key.length });
+    tree.insert(key, { page: 2, position: index, ordinal: index });
+    tree.insert(key, { page: 2, position: index + 20, ordinal: index + 20 });
   }
 
   const restored = StringBTree.deserialize(JSON.parse(JSON.stringify(tree.serialize())));
@@ -96,7 +96,7 @@ test("serializes and restores leaf next links", () => {
     "banana", "band", "bandana", "cat", "dog"
   ];
   for (const [index, key] of keys.entries()) {
-    tree.insert(key, { page: 1, position: index });
+    tree.insert(key, { page: 1, position: index, ordinal: index });
   }
 
   const collectLeaves = (node, leaves = []) => {
@@ -147,11 +147,11 @@ test("serializes and restores leaf next links", () => {
   }
 });
 
-test("retains original match length when normalization changes its length", () => {
+test("stores token ordinals with character positions", () => {
   const tree = new StringBTree(2);
-  tree.insert("i\u0307", { page: 1, position: 12, end: 13 });
+  tree.insert("word", { page: 1, position: 12, ordinal: 4 });
 
-  assert.deepEqual(tree.search("i\u0307"), [
-    { page: 1, positions: [12], lengths: [1] }
+  assert.deepEqual(tree.search("word"), [
+    { page: 1, positions: [12], ordinals: [4] }
   ]);
 });

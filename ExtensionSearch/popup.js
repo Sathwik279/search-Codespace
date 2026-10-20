@@ -10,11 +10,12 @@ const refreshButton = document.getElementById("refresh-button");
 let extractedCharacterCount = 0;
 let indexedPages = [];
 let invertedIndex = new StringBTree(2);
+let permutermIndex = new PermutermIndex(2);
 let activeDocumentUrl = "";
 let activeTabId;
 let currentSearchId = 0;
 let currentLoadId = 0;
-const DOCUMENT_INDEX_VERSION = 4;
+const DOCUMENT_INDEX_VERSION = 6;
 
 if (globalThis.pdfjsLib) {
   globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
@@ -73,7 +74,10 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
     url: documentInfo.url,
     title: documentInfo.title,
     pageTexts,
-    index: buildResult.index.serialize(),
+    indexes: {
+      terms: buildResult.index.serialize(),
+      permuterm: buildResult.permutermIndex.serialize()
+    },
     updatedAt: Date.now(),
     version: DOCUMENT_INDEX_VERSION
   });
@@ -82,6 +86,7 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
   extractedCharacterCount = buildResult.extractedCharacterCount;
   indexedPages = pageTexts;
   invertedIndex = buildResult.index;
+  permutermIndex = buildResult.permutermIndex;
   return true;
 }
 
@@ -94,7 +99,8 @@ function restoreIndex(record, loadId) {
     throw new TypeError("The stored document index has an unsupported or invalid format.");
   }
 
-  const restoredIndex = StringBTree.deserialize(record.index);
+  const restoredIndex = StringBTree.deserialize(record.indexes?.terms);
+  const restoredPermutermIndex = PermutermIndex.deserialize(record.indexes?.permuterm);
   if (loadId !== currentLoadId) return false;
   indexedPages = record.pageTexts;
   extractedCharacterCount = indexedPages.reduce(
@@ -102,6 +108,7 @@ function restoreIndex(record, loadId) {
     Math.max(0, indexedPages.length - 1) * 2
   );
   invertedIndex = restoredIndex;
+  permutermIndex = restoredPermutermIndex;
   return true;
 }
 
@@ -122,7 +129,7 @@ function renderResults(results) {
   resultCountElement.textContent = `${pageCount} · ${occurrenceCount}`;
 
   if (results.length === 0) {
-    showMessage("No pages matched those word prefixes. Try another search.");
+    showMessage("No pages matched that query. Try another search.");
     return;
   }
 
@@ -195,7 +202,7 @@ async function runSearch(rawQuery, persist = true) {
   const loadId = currentLoadId;
 
   if (!query) {
-    showMessage("Search by one or more word prefixes.");
+    showMessage("Search by a word prefix, wildcard, or phrase.");
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
     if (persist && documentUrl) {
       try {
@@ -210,7 +217,12 @@ async function runSearch(rawQuery, persist = true) {
   }
 
   try {
-    const results = SearchQueryExecutor.search(invertedIndex, indexedPages, query);
+    const results = SearchQueryExecutor.search(
+      invertedIndex,
+      permutermIndex,
+      indexedPages,
+      query
+    );
     if (searchId !== currentSearchId || loadId !== currentLoadId) return;
     renderResults(results);
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
@@ -368,7 +380,7 @@ async function loadActiveTabText(forceRefresh = false) {
           if (savedQuery) {
             await runSearch(savedQuery, false);
           } else {
-            showMessage("Search this saved document by one or more word prefixes.");
+            showMessage("Search this saved document by a word prefix, wildcard, or phrase.");
           }
           return;
         } catch (restoreError) {
@@ -409,7 +421,7 @@ async function loadActiveTabText(forceRefresh = false) {
     if (savedQuery) {
       await runSearch(savedQuery, false);
     } else {
-      showMessage("Search this document by one or more word prefixes.");
+      showMessage("Search this document by a word prefix, wildcard, or phrase.");
     }
   } catch (error) {
     if (loadId !== currentLoadId) return;

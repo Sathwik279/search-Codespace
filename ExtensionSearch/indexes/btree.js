@@ -69,7 +69,7 @@ class StringBTree {
         if (node.isLeaf) {
             node.postings[idx] = [];
             if (posting !== null && posting !== undefined) {
-                this._appendPosting(node.postings[idx], posting, insVal.length);
+                this._appendPosting(node.postings[idx], posting);
             }
         }
         node.numKeys++;
@@ -89,7 +89,7 @@ class StringBTree {
         if (node.isLeaf && this.root === currNode) {
             let idx = this.lowerBound(0, node.numKeys - 1, insVal, node.keys);
             if (idx < node.numKeys && node.keys[idx] === insVal) {
-                this._appendPosting(node.postings[idx], posting, insVal.length);
+                this._appendPosting(node.postings[idx], posting);
                 return { retInsVal: null, retNode: null };
             }
             if (node.numKeys < 2 * this.order) {
@@ -116,7 +116,7 @@ class StringBTree {
         if (node.isLeaf) {
             let idx = this.lowerBound(0, node.numKeys - 1, insVal, node.keys);
             if (idx < node.numKeys && node.keys[idx] === insVal) {
-                this._appendPosting(node.postings[idx], posting, insVal.length);
+                this._appendPosting(node.postings[idx], posting);
                 return { retInsVal: null, retNode: null };
             }
             if (node.numKeys < 2 * this.order) {
@@ -172,10 +172,22 @@ class StringBTree {
     }
 
     insert(insVal, posting) {
+        if (
+            posting !== null &&
+            posting !== undefined &&
+            (!Number.isInteger(posting?.page) ||
+                posting.page < 1 ||
+                !Number.isInteger(posting.position) ||
+                posting.position < 0 ||
+                !Number.isInteger(posting.ordinal) ||
+                posting.ordinal < 0)
+        ) {
+            throw new TypeError("Posting must include a positive page and nonnegative position and ordinal.");
+        }
         if (this.root === null) {
             this.root = this.initNode(insVal, true);
             if (posting !== null && posting !== undefined) {
-                this._appendPosting(this.root.postings[0], posting, insVal.length);
+                this._appendPosting(this.root.postings[0], posting);
             }
             return;
         }
@@ -254,9 +266,9 @@ class StringBTree {
                         positions: Array.isArray(posting.positions)
                             ? posting.positions.slice()
                             : posting.positions,
-                        lengths: Array.isArray(posting.lengths)
-                            ? posting.lengths.slice()
-                            : posting.lengths
+                        ordinals: Array.isArray(posting.ordinals)
+                            ? posting.ordinals.slice()
+                            : posting.ordinals
                     })));
             }
             return serializedNode;
@@ -335,13 +347,13 @@ class StringBTree {
                                 Number.isInteger(posting?.page) &&
                                 posting.page > 0 &&
                                 Array.isArray(posting.positions) &&
-                                Array.isArray(posting.lengths) &&
-                                posting.lengths.length === posting.positions.length &&
+                                Array.isArray(posting.ordinals) &&
+                                posting.ordinals.length === posting.positions.length &&
                                 posting.positions.every(
                                     (position) => Number.isInteger(position) && position >= 0
                                 ) &&
-                                posting.lengths.every(
-                                    (length) => Number.isInteger(length) && length > 0
+                                posting.ordinals.every(
+                                    (ordinal) => Number.isInteger(ordinal) && ordinal >= 0
                                 )
                         )
                 )
@@ -352,7 +364,7 @@ class StringBTree {
                 postingList.map((posting) => ({
                     ...posting,
                     positions: posting.positions.slice(),
-                    lengths: posting.lengths.slice()
+                    ordinals: posting.ordinals.slice()
                 }))
             );
             leaves.push({ node, nextLeaf: data.nextLeaf });
@@ -368,36 +380,34 @@ class StringBTree {
         return node;
     }
 
-    _appendPosting(postings, posting, termLength) {
+    _appendPosting(postings, posting) {
         if (posting === null || posting === undefined) return;
         if (
             Number.isInteger(posting?.page) &&
             posting.page > 0 &&
             Number.isInteger(posting.position) &&
-            posting.position >= 0
+            posting.position >= 0 &&
+            Number.isInteger(posting.ordinal) &&
+            posting.ordinal >= 0
         ) {
-            const length =
-                Number.isInteger(posting.end) && posting.end > posting.position
-                    ? posting.end - posting.position
-                    : termLength;
             const lastPosting = postings[postings.length - 1];
             if (
                 lastPosting?.page === posting.page &&
                 Array.isArray(lastPosting.positions) &&
-                Array.isArray(lastPosting.lengths)
+                Array.isArray(lastPosting.ordinals)
             ) {
                 lastPosting.positions.push(posting.position);
-                lastPosting.lengths.push(length);
+                lastPosting.ordinals.push(posting.ordinal);
             } else {
                 postings.push({
                     page: posting.page,
                     positions: [posting.position],
-                    lengths: [length]
+                    ordinals: [posting.ordinal]
                 });
             }
             return;
         }
-        postings.push(posting);
+        throw new TypeError("Posting must include a positive page and nonnegative position and ordinal.");
     }
 
     printTree() {

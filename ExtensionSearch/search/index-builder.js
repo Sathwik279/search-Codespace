@@ -2,6 +2,9 @@
   const StringBTree =
     global.StringBTree ||
     (typeof require === "function" ? require("../indexes/btree.js") : null);
+  const PermutermIndex =
+    global.PermutermIndex ||
+    (typeof require === "function" ? require("../indexes/permuterm-index.js") : null);
   const SearchTokenizer =
     global.SearchTokenizer ||
     (typeof require === "function" ? require("./tokenizer.js") : null);
@@ -21,6 +24,8 @@
     }
 
     const index = new StringBTree(2);
+    const permutermIndex = new PermutermIndex(2);
+    const indexedTerms = new Set();
     let indexedWordCount = 0;
     let extractedCharacterCount = 0;
 
@@ -33,8 +38,12 @@
         index.insert(token.term, {
           page: pageIndex + 1,
           position: token.position,
-          end: token.end
+          ordinal: token.ordinal
         });
+        if (!indexedTerms.has(token.term)) {
+          permutermIndex.addTerm(token.term);
+          indexedTerms.add(token.term);
+        }
         indexedWordCount += 1;
 
         if (indexedWordCount % 25000 === 0) {
@@ -49,7 +58,7 @@
     }
 
     if (isCancelled()) return null;
-    return { index, indexedWordCount, extractedCharacterCount };
+    return { index, permutermIndex, indexedWordCount, extractedCharacterCount };
   }
 
   const builder = { build };

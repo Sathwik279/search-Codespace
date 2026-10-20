@@ -4,12 +4,14 @@
       throw new TypeError("Page text must be a string.");
     }
 
-    for (const match of text.matchAll(/[\p{L}\p{N}]+/gu)) {
+    let ordinal = 0;
+    for (const match of text.matchAll(/[A-Za-z0-9]+/g)) {
       yield {
-        term: match[0].toLocaleLowerCase(),
+        term: match[0].toLowerCase(),
         position: match.index,
-        end: match.index + match[0].length
+        ordinal
       };
+      ordinal += 1;
     }
   }
 
@@ -19,12 +21,23 @@
     }
 
     return Array.from(
-      query.matchAll(/[\p{L}\p{N}]+/gu),
-      (match) => match[0].toLocaleLowerCase()
+      query.matchAll(/[A-Za-z0-9]+/g),
+      (match) => match[0].toLowerCase()
     );
   }
 
-  const tokenizer = { tokenizePage, tokenizeQuery };
+  function tokenizeQueryPatterns(query) {
+    if (typeof query !== "string") {
+      throw new TypeError("Search query must be a string.");
+    }
+
+    return Array.from(
+      query.matchAll(/[A-Za-z0-9*]+/g),
+      (match) => match[0].toLowerCase()
+    );
+  }
+
+  const tokenizer = { tokenizePage, tokenizeQuery, tokenizeQueryPatterns };
   global.SearchTokenizer = tokenizer;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = tokenizer;

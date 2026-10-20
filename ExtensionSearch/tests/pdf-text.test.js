@@ -2,6 +2,17 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { extractPageText } = require("../pdf-text.js");
 const StringBTree = require("../indexes/btree.js");
+const SearchTokenizer = require("../search/tokenizer.js");
+
+function indexPage(index, pageText) {
+  for (const token of SearchTokenizer.tokenizePage(pageText)) {
+    index.insert(token.term, {
+      page: 1,
+      position: token.position,
+      ordinal: token.ordinal
+    });
+  }
+}
 
 test("joins a word hyphenated across a PDF line break", () => {
   const items = [
@@ -22,14 +33,7 @@ test("indexes a hyphenated footer occurrence as the complete word", () => {
   ];
   const pageText = extractPageText(items);
   const index = new StringBTree(2);
-
-  for (const match of pageText.matchAll(/[\p{L}\p{N}]+/gu)) {
-    index.insert(match[0].toLocaleLowerCase(), {
-      page: 1,
-      position: match.index,
-      end: match.index + match[0].length
-    });
-  }
+  indexPage(index, pageText);
 
   const postings = index.search("tokenization");
   assert.equal(postings.length, 1);
@@ -37,7 +41,7 @@ test("indexes a hyphenated footer occurrence as the complete word", () => {
   assert.equal(postings[0].positions.length, 1);
   const position = postings[0].positions[0];
   assert.equal(
-    pageText.slice(position, position + postings[0].lengths[0]),
+    pageText.slice(position, position + "tokenization".length),
     "tokenization"
   );
 });
@@ -80,13 +84,7 @@ test("rejoins OCR words with spaces between letters inside a text item", () => {
   assert.equal(pageText, "Contents The prime mission is clear. of");
 
   const index = new StringBTree(2);
-  for (const match of pageText.matchAll(/[\p{L}\p{N}]+/gu)) {
-    index.insert(match[0].toLocaleLowerCase(), {
-      page: 1,
-      position: match.index,
-      end: match.index + match[0].length
-    });
-  }
+  indexPage(index, pageText);
   const postings = index.search("mission");
   assert.equal(postings.length, 1);
   const position = postings[0].positions[0];
