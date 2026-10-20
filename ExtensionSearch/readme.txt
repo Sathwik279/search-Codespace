@@ -150,6 +150,83 @@ Index initialization
   ordinary webpage text is indexed as page 1. The page strings and serialized
   B-tree are written to IndexedDB before the search input is enabled.
 
+Posting storage walkthrough
+---------------------------
+The index builder creates one intermediate occurrence object for every token.
+For the page text `the cat and the cat`, tokenization produces:
+
+  `the` -> { term: "the", position: 0,  end: 3 }
+  `cat` -> { term: "cat", position: 4,  end: 7 }
+  `and` -> { term: "and", position: 8,  end: 11 }
+  `the` -> { term: "the", position: 12, end: 15 }
+  `cat` -> { term: "cat", position: 16, end: 19 }
+
+The builder passes each occurrence to the B-tree as the key and a posting input:
+
+  index.insert(token.term, {
+    page: pageIndex + 1,
+    position: token.position,
+    end: token.end
+  });
+
+For example, the two `the` occurrences are passed separately:
+
+  insert("the", { page: 1, position: 0,  end: 3 })
+  insert("the", { page: 1, position: 12, end: 15 })
+
+The B-tree finds the leaf slot for `"the"` and appends both occurrences to
+that term's posting list. `_appendPosting()` converts each exclusive `end`
+offset into a length (`end - position`), so the stored page posting becomes:
+
+  key "the"
+      |
+      v
+  node.postings[the-key-slot]
+      |
+      +-- [ { page: 1, positions: [0, 12], lengths: [3, 3] } ]
+
+The same process for `"cat"` produces:
+
+  key "cat"
+      |
+      v
+  node.postings[cat-key-slot]
+      |
+      +-- [ { page: 1, positions: [4, 16], lengths: [3, 3] } ]
+
+The complete leaf storage is conceptually nested like this (keys are kept in
+sorted order, so the actual slot numbers depend on the node):
+
+  node.keys
+      [ "and"                 | "cat"                                  | "the"                                  ]
+             |                       |                                        |
+             v                       v                                        v
+  node.postings
+      [ [ { page: 1, ... } ] | [ { page: 1, positions: [4,16], ... } ] | [ { page: 1, positions: [0,12], ... } ] ]
+        ^                       ^                                        ^
+        posting list for and    posting list for cat                     posting list for the
+
+More explicitly, the shape is:
+
+  node.postings = [
+    [ { page: 1, positions: [8],      lengths: [3] } ],  // node.keys[0] = "and"
+    [ { page: 1, positions: [4, 16],  lengths: [3, 3] } ], // node.keys[1] = "cat"
+    [ { page: 1, positions: [0, 12],  lengths: [3, 3] } ]  // node.keys[2] = "the"
+  ];
+
+So the bracket levels are:
+
+  node.postings
+    [ posting list for key 0, posting list for key 1, ... ]
+        [ page posting, page posting, ... ]
+            { page, positions: [...], lengths: [...] }
+
+`positions[i]` and `lengths[i]` describe the same occurrence. Positions are
+zero-based character offsets within that page's extracted text; lengths are
+the original token span lengths. The exclusive end is recovered as
+`positions[i] + lengths[i]`. A leaf's `node.postings[i]` belongs to
+`node.keys[i]`; internal nodes have no posting lists.
+
 `SearchQueryExecutor.search(index, pageTexts, query)`
   Called by popup.js whenever the search field changes. It returns page result
   objects containing the page number, occurrence count, and occurrence snippets.
