@@ -8,6 +8,9 @@
   const SearchTokenizer =
     global.SearchTokenizer ||
     (typeof require === "function" ? require("./tokenizer.js") : null);
+  const TrigramIndex =
+    global.TrigramIndex ||
+    (typeof require === "function" ? require("./trigram-index.js") : null);
 
   async function build(pageTexts, options = {}) {
     if (
@@ -25,6 +28,7 @@
 
     const index = new StringBTree(2);
     const permutermIndex = new PermutermIndex(2);
+    const trigramIndex = new TrigramIndex();
     const indexedTerms = new Set();
     let indexedWordCount = 0;
     let extractedCharacterCount = 0;
@@ -42,6 +46,7 @@
         });
         if (!indexedTerms.has(token.term)) {
           permutermIndex.addTerm(token.term);
+          trigramIndex.addTerm(token.term);
           indexedTerms.add(token.term);
         }
         indexedWordCount += 1;
@@ -58,7 +63,7 @@
     }
 
     if (isCancelled()) return null;
-    return { index, permutermIndex, indexedWordCount, extractedCharacterCount };
+    return { index, permutermIndex, trigramIndex, indexedWordCount, extractedCharacterCount };
   }
 
   const builder = { build };

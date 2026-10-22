@@ -8,10 +8,10 @@ text from the active tab. PDF files are downloaded from their tab URL and
 parsed locally with PDF.js, avoiding dependence on Chrome's built-in PDF
 viewer DOM. Other HTTP(S) webpages are read by an injected content script.
 
-The extension builds an in-memory term B-tree and permuterm B-tree, then
-persists both serialized indexes, page text, and the last search term in
-IndexedDB. Reopening the side panel for the same document restores its indexes
-without extracting or tokenizing the document again. A refresh button
+The extension builds an in-memory term B-tree, permuterm B-tree, and trigram
+index, then persists the serialized indexes, page text, and the last search term
+in IndexedDB. Reopening the side panel for the same document restores its
+indexes without extracting or tokenizing the document again. A refresh button
 explicitly rebuilds the saved indexes.
 
 Files
@@ -63,24 +63,32 @@ search/tokenizer.js
   lowercases them consistently. Each document token includes its zero-based
   character position and zero-based token ordinal within its page.
 
+search/trigram-index.js
+  Indexes every unique term by character trigrams (n = 3). When a query has no
+  results, shared trigram postings form a candidate subset; terms with a Jaccard
+  coefficient below 0.2 are discarded before bounded edit-distance ranking.
+
 search/index-builder.js
-  Builds a StringBTree from page text using SearchTokenizer. It groups each
-  token's character positions and ordinals by page and reports progress so the
-  UI can yield during large indexing jobs. It returns the in-memory index and
-  character/word counts; popup.js owns persistence and cancellation.
+  Builds the term B-tree, permuterm index, and trigram index from page text
+  using SearchTokenizer. It groups each token's character positions and
+  ordinals by page and reports progress so the UI can yield during large
+  indexing jobs. It returns the in-memory indexes and character/word counts;
+  popup.js owns persistence and cancellation.
 
 search/query-executor.js
   Resolves prefix and one-star wildcard query tokens to terms, fetches their
   postings from the term index, checks phrase adjacency, and builds context
   snippets. It does not rank results; pages are returned in ascending
-  page-number order.
+  page-number order. Its spelling-suggestion path runs only when a query has no
+  results, preserves tokens that already match a prefix, and presents clickable
+  corrected query alternatives in the side panel.
 
 indexes/
   Contains the individual search-index implementations. Currently it contains
   btree.js and permuterm-index.js. Phrase matching uses the term B-tree
   postings' token ordinals. The permuterm index resolves one-star wildcard
   patterns to candidate terms; the term B-tree then supplies their postings.
-  Future bigram or k-gram indexes can be added here as separate implementations.
+  The trigram candidate index is implemented in search/trigram-index.js.
 
 indexes/btree.js
   Defines StringBTree and its node structure. The configurable order controls
@@ -98,9 +106,9 @@ indexes/permuterm-index.js
   them together.
 
 index-storage.js
-  Stores each document's page text and serialized term and permuterm indexes in
-  the extension's IndexedDB database. It separately stores the last search
-  term by document URL so typing a query does not rewrite the indexes.
+  Stores each document's page text and serialized term, permuterm, and trigram
+  indexes in the extension's IndexedDB database. It separately stores the last
+  search term by document URL so typing a query does not rewrite the indexes.
 
 pdfjs/
   Contains the locally bundled PDF.js 3.11.174 library (`pdf.min.js`), its
@@ -159,7 +167,7 @@ Index initialization
   across a PDF line-ending hyphen is indexed as the complete word. OCR words
   encoded with spaces between ASCII letters are also reconstructed. PDF page
   numbers start at 1; ordinary webpage text is indexed as page 1. The page
-  strings and serialized term and permuterm indexes are written to IndexedDB
+  strings and serialized term, permuterm, and trigram indexes are written to IndexedDB
   before the search input is enabled.
 
 Posting storage walkthrough
@@ -239,7 +247,7 @@ are used to verify phrase adjacency. The highlight end is recovered as
 `positions[i] + node.keys[keyIndex].length`. A leaf's `node.postings[i]`
 belongs to `node.keys[i]`; internal nodes have no posting lists.
 
-`SearchQueryExecutor.search(index, pageTexts, query)`
+`SearchQueryExecutor.search(index, permutermIndex, pageTexts, query)`
   Called by popup.js whenever the search field changes. It returns page result
   objects containing the page number, occurrence count, and occurrence snippets.
 
@@ -261,6 +269,12 @@ belongs to `node.keys[i]`; internal nodes have no posting lists.
   a context snippet for each match. Phrase matches highlight from the first
   term through the last. The results header displays matching pages and total
   occurrences.
+
+  If no pages match, `SearchQueryExecutor.suggest(index, trigramIndex, query)`
+  offers up to three spelling corrections. Distinct trigrams (n = 3) retrieve
+  the candidate subset, Jaccard similarity filters it at 0.2, and bounded
+  Levenshtein distance ranks the remaining terms. Existing prefix matches and
+  wildcard tokens are left unchanged.
 
   Page labels are the PDF page positions (for example, PDF page 3 of the file),
   not a printed page number from the document footer. PDF.js may extract

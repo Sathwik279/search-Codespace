@@ -3,6 +3,7 @@ const test = require("node:test");
 const StringBTree = require("../indexes/btree.js");
 const PermutermIndex = require("../indexes/permuterm-index.js");
 const SearchTokenizer = require("../search/tokenizer.js");
+const TrigramIndex = require("../search/trigram-index.js");
 const SearchIndexBuilder = require("../search/index-builder.js");
 const SearchQueryExecutor = require("../search/query-executor.js");
 
@@ -21,6 +22,10 @@ test("index builder creates a searchable index and reports character count", asy
 
   assert.equal(result.indexedWordCount, 3);
   assert.equal(result.extractedCharacterCount, 25);
+  assert.deepEqual(
+    result.trigramIndex.findCandidates("app").map(({ term }) => term),
+    ["apple", "application"]
+  );
   assert.deepEqual(result.index.prefixSearch("app").map(({ key }) => key), [
     "apple",
     "application"
@@ -157,6 +162,27 @@ test("query executor matches multi-word phrases using consecutive token ordinals
     SearchQueryExecutor.search(index, permutermIndex, pageTexts, "quick fox"),
     []
   );
+});
+
+test("query executor suggests spelling corrections from trigram and edit-distance candidates", async () => {
+  const pageTexts = ["apple quick brown fox"];
+  const { index, trigramIndex } = await SearchIndexBuilder.build(pageTexts);
+
+  assert.deepEqual(
+    SearchQueryExecutor.suggest(index, trigramIndex, "aplpe"),
+    ["apple"]
+  );
+  assert.deepEqual(
+    SearchQueryExecutor.suggest(index, trigramIndex, "quik brown"),
+    ["quick brown"]
+  );
+  assert.deepEqual(SearchQueryExecutor.suggest(index, trigramIndex, "zzzz"), []);
+  assert.deepEqual(SearchQueryExecutor.suggest(index, trigramIndex, "app"), []);
+
+  const restored = TrigramIndex.deserialize(
+    JSON.parse(JSON.stringify(trigramIndex.serialize()))
+  );
+  assert.deepEqual(restored.findCandidates("aplpe"), trigramIndex.findCandidates("aplpe"));
 });
 
 test("permuterm wildcards resolve prefix, suffix, and middle patterns", async () => {

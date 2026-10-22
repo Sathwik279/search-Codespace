@@ -396,6 +396,29 @@ h2 {
   font-size: 12px;
 }
 
+.suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.suggestion-button {
+  padding: 6px 10px;
+  border: 1px solid #d9d6ff;
+  border-radius: 999px;
+  background: #f4f2ff;
+  color: #5e54c7;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.suggestion-button:hover {
+  background: #ebe8ff;
+}
+
 .empty-icon {
   display: grid;
   width: 42px;

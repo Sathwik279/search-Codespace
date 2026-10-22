@@ -11,11 +11,12 @@ let extractedCharacterCount = 0;
 let indexedPages = [];
 let invertedIndex = new StringBTree(2);
 let permutermIndex = new PermutermIndex(2);
+let trigramIndex = new TrigramIndex();
 let activeDocumentUrl = "";
 let activeTabId;
 let currentSearchId = 0;
 let currentLoadId = 0;
-const DOCUMENT_INDEX_VERSION = 6;
+const DOCUMENT_INDEX_VERSION = 7;
 
 if (globalThis.pdfjsLib) {
   globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
@@ -76,7 +77,8 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
     pageTexts,
     indexes: {
       terms: buildResult.index.serialize(),
-      permuterm: buildResult.permutermIndex.serialize()
+      permuterm: buildResult.permutermIndex.serialize(),
+      trigrams: buildResult.trigramIndex.serialize()
     },
     updatedAt: Date.now(),
     version: DOCUMENT_INDEX_VERSION
@@ -87,6 +89,7 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
   indexedPages = pageTexts;
   invertedIndex = buildResult.index;
   permutermIndex = buildResult.permutermIndex;
+  trigramIndex = buildResult.trigramIndex;
   return true;
 }
 
@@ -101,6 +104,7 @@ function restoreIndex(record, loadId) {
 
   const restoredIndex = StringBTree.deserialize(record.indexes?.terms);
   const restoredPermutermIndex = PermutermIndex.deserialize(record.indexes?.permuterm);
+  const restoredTrigramIndex = TrigramIndex.deserialize(record.indexes?.trigrams);
   if (loadId !== currentLoadId) return false;
   indexedPages = record.pageTexts;
   extractedCharacterCount = indexedPages.reduce(
@@ -109,10 +113,11 @@ function restoreIndex(record, loadId) {
   );
   invertedIndex = restoredIndex;
   permutermIndex = restoredPermutermIndex;
+  trigramIndex = restoredTrigramIndex;
   return true;
 }
 
-function renderResults(results) {
+function renderResults(results, suggestions = []) {
   if (!Array.isArray(results)) {
     throw new TypeError("Search results must be an array of result objects.");
   }
@@ -130,6 +135,22 @@ function renderResults(results) {
 
   if (results.length === 0) {
     showMessage("No pages matched that query. Try another search.");
+    if (suggestions.length > 0) {
+      const suggestionList = document.createElement("div");
+      suggestionList.className = "suggestion-list";
+      for (const suggestion of suggestions) {
+        const button = document.createElement("button");
+        button.className = "suggestion-button";
+        button.type = "button";
+        button.textContent = `Did you mean "${suggestion}"?`;
+        button.addEventListener("click", () => {
+          searchInput.value = suggestion;
+          void runSearch(suggestion);
+        });
+        suggestionList.append(button);
+      }
+      resultsElement.querySelector(".empty-state").append(suggestionList);
+    }
     return;
   }
 
@@ -224,7 +245,10 @@ async function runSearch(rawQuery, persist = true) {
       query
     );
     if (searchId !== currentSearchId || loadId !== currentLoadId) return;
-    renderResults(results);
+    const suggestions = results.length === 0
+      ? SearchQueryExecutor.suggest(invertedIndex, trigramIndex, query)
+      : [];
+    renderResults(results, suggestions);
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
     if (persist && documentUrl) {
       try {

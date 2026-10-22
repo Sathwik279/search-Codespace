@@ -27,6 +27,95 @@
     return Array.from(matchingTerms.values());
   }
 
+  function getEditDistance(left, right, maximumDistance) {
+    if (Math.abs(left.length - right.length) > maximumDistance) return maximumDistance + 1;
+
+    let previousRow = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+      const currentRow = [leftIndex];
+      let rowMinimum = leftIndex;
+      for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+        const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+        currentRow[rightIndex] = Math.min(
+          currentRow[rightIndex - 1] + 1,
+          previousRow[rightIndex] + 1,
+          previousRow[rightIndex - 1] + cost
+        );
+        rowMinimum = Math.min(rowMinimum, currentRow[rightIndex]);
+      }
+      if (rowMinimum > maximumDistance) return maximumDistance + 1;
+      previousRow = currentRow;
+    }
+    return previousRow[right.length];
+  }
+
+  function suggest(index, trigramIndex, query, limit = 3) {
+    if (!index || typeof index.prefixSearch !== "function") {
+      throw new TypeError("Search index must support prefixSearch(prefix).");
+    }
+    if (!trigramIndex || typeof trigramIndex.findCandidates !== "function") {
+      throw new TypeError("Trigram index must support findCandidates(term).");
+    }
+    if (typeof query !== "string") {
+      throw new TypeError("Search query must be a string.");
+    }
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new TypeError("Suggestion limit must be a positive integer.");
+    }
+
+    const matches = Array.from(query.matchAll(/[A-Za-z0-9*]+/g));
+    let alternatives = [{ query: "", score: 0 }];
+    let hasCorrection = false;
+    let previousEnd = 0;
+
+    for (const match of matches) {
+      const token = match[0].toLowerCase();
+      const isTypoCandidate =
+        !token.includes("*") &&
+        index.prefixSearch(token).length === 0;
+      let options = [{ term: match[0], score: 0 }];
+
+      if (isTypoCandidate) {
+        const maximumDistance = Math.min(3, Math.max(1, Math.ceil(token.length / 4)));
+        options = trigramIndex.findCandidates(token)
+          .map(({ term, jaccard }) => ({
+            term,
+            jaccard,
+            distance: getEditDistance(token, term, maximumDistance)
+          }))
+          .filter(({ distance }) => distance <= maximumDistance)
+          .sort((left, right) =>
+            left.distance - right.distance ||
+            right.jaccard - left.jaccard ||
+            left.term.localeCompare(right.term)
+          )
+          .slice(0, limit)
+          .map(({ term, distance, jaccard }) => ({
+            term,
+            score: distance + (1 - jaccard)
+          }));
+        if (options.length > 0) hasCorrection = true;
+      }
+
+      const unchangedText = query.slice(previousEnd, match.index);
+      alternatives = alternatives.flatMap((alternative) =>
+        options.map((option) => ({
+          query: `${alternative.query}${unchangedText}${option.term}`,
+          score: alternative.score + option.score
+        }))
+      )
+        .sort((left, right) => left.score - right.score || left.query.localeCompare(right.query))
+        .slice(0, limit);
+      previousEnd = match.index + match[0].length;
+    }
+
+    if (!hasCorrection) return [];
+    const suffix = query.slice(previousEnd);
+    return alternatives
+      .map((alternative) => `${alternative.query}${suffix}`)
+      .filter((suggestion) => suggestion.toLowerCase() !== query.toLowerCase());
+  }
+
   function search(index, permutermIndex, pageTexts, query) {
     if (!index || typeof index.prefixSearch !== "function") {
       throw new TypeError("Search index must support prefixSearch(prefix).");
@@ -147,7 +236,7 @@
     }).sort((left, right) => left.page - right.page);
   }
 
-  const executor = { search };
+  const executor = { search, suggest };
   global.SearchQueryExecutor = executor;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = executor;
