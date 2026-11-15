@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Document Search",
   "version": "1.0.0",
-  "description": "Search active webpages and PDFs with a locally persisted B-tree index.",
+  "description": "Search active webpages and PDFs with a locally persisted B+ tree index.",
   "permissions": [
     "activeTab",
     "sidePanel",
