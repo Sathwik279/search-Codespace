@@ -1,4 +1,7 @@
 (function exposeSearchTokenizer(global) {
+
+
+
   function* tokenizePage(text) {
     if (typeof text !== "string") {
       throw new TypeError("Page text must be a string.");
@@ -15,31 +18,28 @@
     }
   }
 
-  function tokenizeQuery(query) {
+
+
+  function tokenizeQuery(query, options = {}) {
     if (typeof query !== "string") {
       throw new TypeError("Search query must be a string.");
     }
 
+    const allowWildcards =
+      typeof options === "boolean" ? options : Boolean(options?.allowWildcards);
+    const pattern = allowWildcards ? /[A-Za-z0-9*]+/g : /[A-Za-z0-9]+/g;
+
     return Array.from(
-      query.matchAll(/[A-Za-z0-9]+/g),
+      query.matchAll(pattern),
       (match) => match[0].toLowerCase()
     );
   }
 
-  function tokenizeQueryPatterns(query) {
-    if (typeof query !== "string") {
-      throw new TypeError("Search query must be a string.");
-    }
-
-    return Array.from(
-      query.matchAll(/[A-Za-z0-9*]+/g),
-      (match) => match[0].toLowerCase()
-    );
-  }
-
-  const tokenizer = { tokenizePage, tokenizeQuery, tokenizeQueryPatterns };
+  const tokenizer = { tokenizePage, tokenizeQuery };
   global.SearchTokenizer = tokenizer;
+
   if (typeof module !== "undefined" && module.exports) {
     module.exports = tokenizer;
   }
+  
 })(globalThis);

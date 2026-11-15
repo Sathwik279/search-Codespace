@@ -141,7 +141,7 @@
       throw new TypeError("Only one wildcard (*) is supported per query.");
     }
 
-    const queryTokens = SearchTokenizer.tokenizeQueryPatterns(query);
+    const queryTokens = SearchTokenizer.tokenizeQuery(query, { allowWildcards: true });
     if (queryTokens.length === 0) return [];
 
     const candidatesByToken = queryTokens.map(() => new Map());

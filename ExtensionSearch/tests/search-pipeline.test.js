@@ -14,7 +14,7 @@ test("tokenizer uses ASCII alphanumerics and retains offsets and ordinals", () =
     { term: "42", position: 11, ordinal: 2 }
   ]);
   assert.deepEqual(SearchTokenizer.tokenizeQuery("APP, café42"), ["app", "caf", "42"]);
-  assert.deepEqual(SearchTokenizer.tokenizeQueryPatterns("c*t"), ["c*t"]);
+  assert.deepEqual(SearchTokenizer.tokenizeQuery("c*t", { allowWildcards: true }), ["c*t"]);
 });
 
 test("index builder creates a searchable index and reports character count", async () => {
