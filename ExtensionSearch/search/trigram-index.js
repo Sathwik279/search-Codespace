@@ -1,4 +1,6 @@
 (function exposeTrigramIndex(global) {
+
+
   const SERIALIZATION_VERSION = 1;
   const TERM_PATTERN = /^[a-z0-9]+$/;
 
@@ -21,6 +23,7 @@
   }
 
   class TrigramIndex {
+
     constructor() {
       this.termsByNgram = new Map();
     }
@@ -41,6 +44,7 @@
     }
 
     findCandidates(term, minimumJaccard = 0.2) {
+      
       if (typeof term !== "string" || !TERM_PATTERN.test(term)) {
         throw new TypeError("Trigram queries must contain lowercase ASCII letters and digits.");
       }

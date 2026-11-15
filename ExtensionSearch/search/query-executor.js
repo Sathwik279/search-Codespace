@@ -1,4 +1,5 @@
 (function exposeSearchQueryExecutor(global) {
+  
   const SearchTokenizer =
     global.SearchTokenizer ||
     (typeof require === "function" ? require("./tokenizer.js") : null);
