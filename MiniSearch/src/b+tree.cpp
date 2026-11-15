@@ -24,7 +24,9 @@ struct Node{
 
 Node* root = nullptr; // nullptr says that this ptr points to no object.
 
-int findIdx(int start, int end, int insVal, int keys[]){
+
+// you can also think findIdx as the upper bound for the insVal
+int findIdx(int start, int end, int insVal, int keys[]){  // findIdx finds the first index in the keys array which is > insVal and this helps in case of duplicates
     while(start<=end){
         int mid = (start)+(end-start)/2;
         if(keys[mid]<=insVal){

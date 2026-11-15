@@ -1,11 +1,29 @@
 class Node {
     constructor(isLeaf = true, order = 2) {
+        if (new.target === Node) {
+            return isLeaf ? new LeafNode(order) : new InternalNode(order);
+        }
+        this.isLeaf = isLeaf;
+        this.order = order;
         // Allocate one extra key slot so a node can overflow before splitting.
         this.keys = new Array(2 * order + 1).fill(null);
-        this.postings = isLeaf ? new Array(2 * order + 1).fill(null) : null;
-        this.pointers = new Array(2 * order + 2).fill(null);
-        this.isLeaf = isLeaf;
         this.numKeys = 0;
+    }
+}
+
+class InternalNode extends Node {
+    constructor(order = 2) {
+        super(false, order);
+        this.pointers = new Array(2 * order + 2).fill(null);
+        this.postings = null;
+    }
+}
+
+class LeafNode extends Node {
+    constructor(order = 2) {
+        super(true, order);
+        this.postings = new Array(2 * order + 1).fill(null);
+        this.pointers = null;
         this.nextLeaf = null;
     }
 }
@@ -30,7 +48,7 @@ class StringBTree {
     }
 
     initNode(insVal, isLeaf = true) {
-        let currNode = new Node(isLeaf, this.order);
+        let currNode = isLeaf ? new LeafNode(this.order) : new InternalNode(this.order);
         currNode.keys[0] = insVal;
         if (isLeaf) currNode.postings[0] = [];
         currNode.numKeys = 1;
@@ -38,14 +56,16 @@ class StringBTree {
     }
 
     initNodeFromSlice(node, start, end, isLeaf) {
-        let currNode = new Node(isLeaf, this.order);
+        let currNode = isLeaf ? new LeafNode(this.order) : new InternalNode(this.order);
         for (let i = start; i <= end; i++) {
             currNode.keys[i - start] = node.keys[i];
             if (isLeaf) currNode.postings[i - start] = node.postings[i];
             currNode.numKeys++;
         }
-        for (let i = start; i <= end + 1; i++) {
-            currNode.pointers[i - start] = node.pointers[i];
+        if (!isLeaf) {
+            for (let i = start; i <= end + 1; i++) {
+                currNode.pointers[i - start] = node.pointers[i];
+            }
         }
         return currNode;
     }
@@ -59,11 +79,13 @@ class StringBTree {
             node.keys[i + 1] = node.keys[i];
             if (node.isLeaf) node.postings[i + 1] = node.postings[i];
         }
-        for (let i = node.numKeys; i >= idx + 1; i--) {
-            node.pointers[i + 1] = node.pointers[i];
-        }
-        if (pointer !== null) {
-            node.pointers[idx + 1] = pointer;
+        if (!node.isLeaf) {
+            for (let i = node.numKeys; i >= idx + 1; i--) {
+                node.pointers[i + 1] = node.pointers[i];
+            }
+            if (pointer !== null) {
+                node.pointers[idx + 1] = pointer;
+            }
         }
         node.keys[idx] = insVal;
         if (node.isLeaf) {
@@ -79,6 +101,11 @@ class StringBTree {
         for (let i = start; i <= end; i++) {
             node.keys[i] = null;
             if (node.isLeaf) node.postings[i] = null;
+        }
+        if (!node.isLeaf) {
+            for (let i = start; i <= end + 1; i++) {
+                node.pointers[i] = null;
+            }
         }
     }
 
@@ -322,7 +349,7 @@ class StringBTree {
             throw new TypeError("Stored B-tree node is invalid.");
         }
 
-        const node = new Node(data.isLeaf, order);
+        const node = data.isLeaf ? new LeafNode(order) : new InternalNode(order);
         node.numKeys = data.numKeys;
         for (let i = 0; i < data.numKeys; i += 1) {
             node.keys[i] = data.keys[i];
@@ -420,9 +447,11 @@ class StringBTree {
             let levelOutput = "";
             for (let i = 0; i < dqSiz; i++) {
                 let currNode = dq.shift();
-                for (let j = 0; j <= currNode.numKeys; j++) {
-                    if (currNode.pointers[j] !== null) {
-                        dq.push(currNode.pointers[j]);
+                if (!currNode.isLeaf && currNode.pointers) {
+                    for (let j = 0; j <= currNode.numKeys; j++) {
+                        if (currNode.pointers[j] !== null) {
+                            dq.push(currNode.pointers[j]);
+                        }
                     }
                 }
                 let validKeys = [];
@@ -436,9 +465,16 @@ class StringBTree {
     }
 }
 
+StringBTree.Node = Node;
+StringBTree.InternalNode = InternalNode;
+StringBTree.LeafNode = LeafNode;
+
 if (typeof module !== "undefined" && module.exports) {
     module.exports = StringBTree;
 }
 if (typeof globalThis !== "undefined") {
     globalThis.StringBTree = StringBTree;
+    globalThis.BTreeNode = Node;
+    globalThis.InternalNode = InternalNode;
+    globalThis.LeafNode = LeafNode;
 }

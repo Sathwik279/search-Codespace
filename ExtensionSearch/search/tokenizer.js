@@ -35,9 +35,13 @@
     );
   }
 
+
+
   const tokenizer = { tokenizePage, tokenizeQuery };
   global.SearchTokenizer = tokenizer;
 
+
+  
   if (typeof module !== "undefined" && module.exports) {
     module.exports = tokenizer;
   }
