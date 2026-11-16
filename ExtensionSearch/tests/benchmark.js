@@ -104,7 +104,8 @@ async function runBenchmarkSuite() {
     const iterations = 50;
 
     let totalChromeTime = 0;
-    let totalBTreeTime = 0;
+    let totalBTreeMetadataTime = 0;
+    let totalBTreeSnippetTime = 0;
     let chromeOccurrencesTotal = 0;
     let btreeOccurrencesTotal = 0;
 
@@ -116,12 +117,28 @@ async function runBenchmarkSuite() {
         totalChromeTime += (performance.now() - t0C);
         if (i === 0) chromeOccurrencesTotal += cRes.occurrences;
 
-        // B+ Tree search
-        const t0B = performance.now();
-        const bRes = SearchQueryExecutor.search(buildResult.index, buildResult.permutermIndex, pages, q);
-        totalBTreeTime += (performance.now() - t0B);
+        // Popup path: return only stored page/occurrence metadata.
+        const t0Metadata = performance.now();
+        const metadataResult = SearchQueryExecutor.search(
+          buildResult.index,
+          buildResult.permutermIndex,
+          pages,
+          q,
+          { includeSnippets: false }
+        );
+        totalBTreeMetadataTime += (performance.now() - t0Metadata);
+
+        // Compatibility path: include snippets for comparison.
+        const t0Snippet = performance.now();
+        const snippetResult = SearchQueryExecutor.search(
+          buildResult.index,
+          buildResult.permutermIndex,
+          pages,
+          q
+        );
+        totalBTreeSnippetTime += (performance.now() - t0Snippet);
         if (i === 0) {
-          const occCount = bRes.reduce((acc, r) => acc + r.occurrenceCount, 0);
+          const occCount = metadataResult.reduce((acc, r) => acc + r.occurrenceCount, 0);
           btreeOccurrencesTotal += occCount;
         }
       }
@@ -129,19 +146,25 @@ async function runBenchmarkSuite() {
 
     const totalRuns = testQueries.length * iterations;
     const avgChromeLatency = (totalChromeTime / totalRuns);
-    const avgBTreeLatency = (totalBTreeTime / totalRuns);
-    const speedup = (avgChromeLatency / avgBTreeLatency).toFixed(1);
-    const latencyReductionPercent = (((avgChromeLatency - avgBTreeLatency) / avgChromeLatency) * 100).toFixed(1);
+    const avgMetadataLatency = (totalBTreeMetadataTime / totalRuns);
+    const avgSnippetLatency = (totalBTreeSnippetTime / totalRuns);
+    const metadataSpeedup = (avgChromeLatency / avgMetadataLatency).toFixed(1);
+    const metadataReductionPercent = (((avgChromeLatency - avgMetadataLatency) / avgChromeLatency) * 100).toFixed(1);
+    const snippetSpeedup = (avgChromeLatency / avgSnippetLatency).toFixed(1);
 
     // Calculate Break-Even Query Count
-    // K * avgChrome = tIndex + K * avgBTree => K = tIndex / (avgChrome - avgBTree)
-    const breakEvenK = Math.ceil(tIndex / (avgChromeLatency - avgBTreeLatency));
+    // K * avgChrome = tIndex + K * avgMetadata => K = tIndex / (avgChrome - avgMetadata)
+    const breakEvenK = avgChromeLatency > avgMetadataLatency
+      ? `${Math.ceil(tIndex / (avgChromeLatency - avgMetadataLatency))}`
+      : "never";
 
     console.log(`\n--- [2] QUERY LATENCY & ACCURACY (${totalRuns} queries tested) ---`);
     console.log(`* Chrome Linear Find Average Latency: ${avgChromeLatency.toFixed(3)} ms`);
-    console.log(`* B+ Tree Index Average Latency:      ${avgBTreeLatency.toFixed(3)} ms`);
-    console.log(`* Latency Reduction:                  ${latencyReductionPercent}% faster`);
-    console.log(`* Speedup Factor:                     ${speedup}x`);
+    console.log(`* Indexed Metadata-Only Latency:     ${avgMetadataLatency.toFixed(3)} ms`);
+    console.log(`* Indexed + Snippet Latency:         ${avgSnippetLatency.toFixed(3)} ms`);
+    console.log(`* Metadata Latency Reduction:        ${metadataReductionPercent}%`);
+    console.log(`* Metadata Speedup Factor:           ${metadataSpeedup}x`);
+    console.log(`* Snippet Speedup Factor:            ${snippetSpeedup}x`);
     console.log(`* Occurrence Accuracy Match:          ${btreeOccurrencesTotal} / ${chromeOccurrencesTotal} (100% parity)`);
     console.log(`* Break-Even Query Threshold (K*):    ${breakEvenK} searches`);
     console.log(`  (After ${breakEvenK} searches in this document, your engine is faster overall.)`);

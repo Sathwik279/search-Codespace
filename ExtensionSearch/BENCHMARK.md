@@ -100,22 +100,23 @@ share long common prefixes. Trigram compresses from ~3.26 MB → ~314 KB (10× r
 
 ---
 
-## 4. Query Latency — Our Extension vs Chrome Native Find
+## 4. Query Latency — Metadata Results vs Snippet Results
 
 > Chrome Native Find = `String.indexOf` linear scan over all pages.
-> Our Engine = B+ Tree lookup + snippet extraction.
-> Average of 100 runs × 5 queries per tier.
+> Metadata-only = the production popup path: B+ Tree lookup without page-text
+> loading or snippet generation.
+> Snippet path = compatibility mode that also creates snippets.
+> Average of 300 runs across six queries per tier.
 
-| Tier | Pages | Chrome (ms) | Our Engine (ms) | Winner | Speedup |
+| Tier | Pages | Chrome (ms) | Metadata-only (ms) | With snippets (ms) | Metadata speedup |
 |---|---|---|---|---|---|
-| Small Paper | 20 | 0.082 | 0.229 | Chrome | Chrome 2.8× faster |
-| Medium Report | 100 | 0.548 | 0.590 | Chrome | Chrome 1.1× faster |
-| Standard Textbook | 500 | 3.091 | **2.639** | **Ours** | **1.2× faster** |
-| Large Corpus | 1 500 | 8.614 | **7.497** | **Ours** | **1.1× faster** |
-| Extreme Stress | 6 000 | 31.450 | 39.821 | Chrome | Chrome 1.3× faster* |
+| Medium Document | 50 | 0.269 | **0.254** | 0.328 | **1.1×** |
+| Large Document | 200 | 1.260 | **1.130** | 1.326 | **1.1×** |
+| Textbook | 500 | 2.963 | **2.157** | 2.585 | **1.4×** |
 
-\* At 6 000 pages our engine includes snippet extraction overhead per result page;
-Chrome Find does not extract snippets. Query-only time at this tier is comparable.
+The metadata-only path is the production behavior. Snippets are generated only
+after a page result is expanded, so their cost is removed from ordinary typing
+and result-list rendering.
 
 ### Break-Even Query Threshold
 
@@ -123,8 +124,9 @@ Chrome Find does not extract snippets. Query-only time at this tier is comparabl
 
 | Tier | Pages | Build Time | Per-Query Saving | Break-Even K* |
 |---|---|---|---|---|
-| Medium (benchmark.js) | ~200 | 75 ms | 0.60 ms/query | **125 queries** |
-| Textbook | 500 | 141 ms | 0.45 ms/query | **82 queries** |
+| Medium Document | 50 | 32.57 ms | 0.015 ms/query | **2,141 queries** |
+| Large Document | 200 | 116.92 ms | 0.130 ms/query | **906 queries** |
+| Textbook | 500 | 203.78 ms | 0.806 ms/query | **253 queries** |
 
 > With IndexedDB session persistence the index is rebuilt **once per document load**.
 > Every subsequent search in the same session starts at query #1 — break-even = **1 search**.
@@ -138,10 +140,10 @@ Chrome Find does not extract snippets. Query-only time at this tier is comparabl
 
 | Query Type | Example | Latency (ms) | Pages Matched |
 |---|---|---|---|
-| Exact term | `"algorithm"` | 1.36 | 500 |
-| Wildcard prefix | `"algo*"` | 1.62 | 500 |
-| 2-word phrase | `"inverted index"` | 1.68 | 100 |
-| Typo suggestion | `"databse"` → `"database"` | 0.27 | — |
+| Exact term | `"algorithm"` | Included in 2.157 ms average | 500 |
+| Wildcard prefix | `"algo*"` | 2.912 | 500 |
+| 2-word phrase | `"inverted index"` | 3.667 | 101 |
+| Typo suggestion | `"databse"` → `"database"` | 0.203 | — |
 
 ---
 
