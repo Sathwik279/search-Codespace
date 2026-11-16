@@ -54,7 +54,8 @@ popup.js
   Coordinates active-tab detection, PDF or webpage text extraction, and the
   index/search flow. It restores a stored tree when available; otherwise it
   asks SearchIndexBuilder to build and persist an index. It validates results
-  from SearchQueryExecutor and renders snippets with textContent.
+  from SearchQueryExecutor and renders stored page/occurrence metadata. A page
+  expansion loads only that page's text and renders its snippets on demand.
   `currentSearchId` prevents an older asynchronous search from replacing the
   results for newer input.
 
@@ -77,9 +78,9 @@ search/index-builder.js
 
 search/query-executor.js
   Resolves prefix and one-star wildcard query tokens to terms, fetches their
-  postings from the term index, checks phrase adjacency, and builds context
-  snippets. It does not rank results; pages are returned in ascending
-  page-number order. Its spelling-suggestion path runs only when a query has no
+  postings from the term index and checks phrase adjacency. It does not rank
+  results; pages are returned in ascending page-number order. Metadata-only
+  searches do not load page text. Its spelling-suggestion path runs only when a query has no
   results, preserves tokens that already match a prefix, and presents clickable
   corrected query alternatives in the side panel.
 
@@ -110,8 +111,8 @@ indexes/permuterm-index.js
 index-storage.js
   Stores serialized term, permuterm, and trigram indexes plus one page-text record
   per document page in IndexedDB. Native CompressionStream('gzip') compresses the
-  index payload when available. SearchQueryExecutor loads only matched page text
-  records for snippets, and separately stores the last search term by URL.
+  index payload when available. It also stores query match metadata without
+  snippets; popup.js loads one page-text record only when that page is expanded.
 
 pdfjs/
   Contains the locally bundled PDF.js 3.11.174 library (`pdf.min.js`), its
@@ -250,9 +251,11 @@ are used to verify phrase adjacency. The highlight end is recovered as
 `positions[i] + node.keys[keyIndex].length`. A leaf's `node.postings[i]`
 belongs to `node.keys[i]`; internal nodes have no posting lists.
 
-`SearchQueryExecutor.search(index, permutermIndex, pageTexts, query)`
-  Called by popup.js whenever the search field changes. It returns page result
-  objects containing the page number, occurrence count, and occurrence snippets.
+`SearchQueryExecutor.search(index, permutermIndex, pageTexts, query, options)`
+  Called by popup.js whenever the search field changes. Popup searches pass
+  `{ includeSnippets: false }`, returning only page numbers, occurrence counts,
+  positions, and matched terms. Snippets are created only after a page result
+  is expanded; the default mode remains available for callers that need them.
 
   Query words are normalized the same way as indexed words. A single query
   token uses B-tree prefix search, so `app` matches terms such as `apple` and
@@ -268,10 +271,10 @@ belongs to `node.keys[i]`; internal nodes have no posting lists.
   multi-token phrase using the same consecutive-ordinal check. Punctuation
   between consecutive tokens does not add an ordinal. Results are grouped by
   page and displayed in ascending page-number order; no ranking is applied.
-  Each page result is an expandable section showing its occurrence count and
-  a context snippet for each match. Phrase matches highlight from the first
-  term through the last. The results header displays matching pages and total
-  occurrences.
+  Each page result is an expandable section showing its occurrence count.
+  Expanding a page loads its text and shows context snippets for that page only.
+  Phrase matches highlight from the first term through the last. The results
+  header displays matching pages and total occurrences.
 
   If no pages match, `SearchQueryExecutor.suggest(index, trigramIndex, query)`
   offers up to three spelling corrections. Distinct trigrams (n = 3) retrieve

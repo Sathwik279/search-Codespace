@@ -134,6 +134,29 @@ test("query executor loads only matched pages from a lazy page text source", asy
   ), "alpha");
 });
 
+test("query executor can return stored match metadata without loading page text", async () => {
+  const pageTexts = ["alpha beta", "alpha gamma"];
+  const { index, permutermIndex } = await SearchIndexBuilder.build(pageTexts);
+  let pageTextLoads = 0;
+  const results = await SearchQueryExecutor.search(
+    index,
+    permutermIndex,
+    {
+      length: pageTexts.length,
+      getPageText: async () => {
+        pageTextLoads += 1;
+        return pageTexts[0];
+      }
+    },
+    "alpha",
+    { includeSnippets: false }
+  );
+
+  assert.equal(pageTextLoads, 0);
+  assert.equal(results[0].occurrences[0].snippet, undefined);
+  assert.equal(results[0].occurrences[0].position, 0);
+});
+
 test("query executor matches multi-word phrases using consecutive token ordinals", async () => {
   const pageTexts = [
     "quick brown fox; quick red fox",

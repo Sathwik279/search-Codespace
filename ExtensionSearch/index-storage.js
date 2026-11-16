@@ -178,11 +178,37 @@
     });
   }
 
+  async function saveSearchResults(url, query, results) {
+    if (
+      typeof url !== "string" ||
+      typeof query !== "string" ||
+      !Array.isArray(results)
+    ) {
+      throw new TypeError("Search results must include a URL, query, and result array.");
+    }
+    const database = await openDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = database.transaction(SEARCH_STORE, "readwrite");
+      transaction.objectStore(SEARCH_STORE).put({ url, query, results });
+      transaction.oncomplete = () => {
+        database.close();
+        resolve();
+      };
+      transaction.onabort = () => {
+        database.close();
+        reject(transaction.error || new Error("Could not save search results."));
+      };
+      transaction.onerror = () => reject(transaction.error || new Error("Could not save search results."));
+    });
+  }
+
   global.DocumentIndexStorage = {
     getDocument: (url) => readRecord(DOCUMENT_STORE, url),
     getPageText,
     getSearchTerm: async (url) => (await readRecord(SEARCH_STORE, url))?.query || "",
+    getSearchResults: async (url) => (await readRecord(SEARCH_STORE, url))?.results || null,
     saveDocument,
-    saveSearchTerm
+    saveSearchTerm,
+    saveSearchResults
   };
 })(globalThis);

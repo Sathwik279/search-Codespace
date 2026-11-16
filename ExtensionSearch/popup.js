@@ -131,6 +131,63 @@ function restoreIndex(record, loadId) {
   return true;
 }
 
+function clearExpandedResults(exceptCard = null) {
+  for (const card of resultsElement.querySelectorAll(".result-card")) {
+    if (card === exceptCard) continue;
+    card.removeAttribute("open");
+    card.querySelector(".occurrences")?.replaceChildren();
+  }
+}
+
+async function loadResultSnippets(card, result, loadId) {
+  const occurrences = card.querySelector(".occurrences");
+  occurrences.replaceChildren();
+  const loading = document.createElement("div");
+  loading.className = "occurrence-meta";
+  loading.textContent = "Loading selected page…";
+  occurrences.append(loading);
+
+  try {
+    const pageText = Array.isArray(indexedPages)
+      ? indexedPages[result.page - 1] || ""
+      : await indexedPages.getPageText(result.page);
+    if (loadId !== currentLoadId || !card.open) return;
+    occurrences.replaceChildren();
+    for (const [index, occurrence] of result.occurrences.entries()) {
+      const occurrenceCard = document.createElement("article");
+      occurrenceCard.className = "occurrence-card";
+      const occurrenceMeta = document.createElement("div");
+      occurrenceMeta.className = "occurrence-meta";
+      occurrenceMeta.textContent = `Occurrence ${index + 1} · Position ${
+        occurrence.position.toLocaleString()
+      }${occurrence.terms.length ? ` · ${occurrence.terms.join(", ")}` : ""}`;
+      const snippet = SearchQueryExecutor.createSnippet(pageText, occurrence);
+      const snippetElement = document.createElement("div");
+      snippetElement.className = "occurrence-snippet";
+      const before = snippet.snippet.slice(0, snippet.matchStart);
+      const matched = snippet.snippet.slice(snippet.matchStart, snippet.matchEnd);
+      const after = snippet.snippet.slice(snippet.matchEnd);
+      if (snippet.leadingEllipsis) snippetElement.append(document.createTextNode("…"));
+      snippetElement.append(document.createTextNode(before));
+      const highlightedMatch = document.createElement("mark");
+      highlightedMatch.textContent = matched;
+      snippetElement.append(highlightedMatch, document.createTextNode(after));
+      if (snippet.trailingEllipsis) snippetElement.append(document.createTextNode("…"));
+      occurrenceCard.append(occurrenceMeta, snippetElement);
+      occurrences.append(occurrenceCard);
+    }
+  } catch (error) {
+    if (loadId !== currentLoadId || !card.open) return;
+    occurrences.replaceChildren();
+    const errorMessage = document.createElement("div");
+    errorMessage.className = "occurrence-meta";
+    errorMessage.textContent = `Could not load page text: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+    occurrences.append(errorMessage);
+  }
+}
+
 function renderResults(results, suggestions = []) {
   if (!Array.isArray(results)) {
     throw new TypeError("Search results must be an array of result objects.");
@@ -197,35 +254,15 @@ function renderResults(results, suggestions = []) {
 
     const occurrences = document.createElement("div");
     occurrences.className = "occurrences";
-    result.occurrences.forEach((occurrence, index) => {
-      if (!occurrence || typeof occurrence.snippet !== "string") {
-        throw new TypeError("Each occurrence must include a string snippet.");
-      }
-      const occurrenceCard = document.createElement("article");
-      occurrenceCard.className = "occurrence-card";
-      const occurrenceMeta = document.createElement("div");
-      occurrenceMeta.className = "occurrence-meta";
-      occurrenceMeta.textContent = `Occurrence ${index + 1} · Position ${
-        occurrence.position.toLocaleString()
-      }${
-        occurrence.terms.length ? ` · ${occurrence.terms.join(", ")}` : ""
-      }`;
-      const snippet = document.createElement("div");
-      snippet.className = "occurrence-snippet";
-      const before = occurrence.snippet.slice(0, occurrence.matchStart);
-      const matched = occurrence.snippet.slice(occurrence.matchStart, occurrence.matchEnd);
-      const after = occurrence.snippet.slice(occurrence.matchEnd);
-      snippet.textContent = "";
-      if (occurrence.leadingEllipsis) snippet.append(document.createTextNode("…"));
-      snippet.append(document.createTextNode(before));
-      const highlightedMatch = document.createElement("mark");
-      highlightedMatch.textContent = matched;
-      snippet.append(highlightedMatch, document.createTextNode(after));
-      if (occurrence.trailingEllipsis) snippet.append(document.createTextNode("…"));
-      occurrenceCard.append(occurrenceMeta, snippet);
-      occurrences.append(occurrenceCard);
-    });
     card.append(occurrences);
+    card.addEventListener("toggle", () => {
+      if (!card.open) {
+        occurrences.replaceChildren();
+        return;
+      }
+      clearExpandedResults(card);
+      void loadResultSnippets(card, result, currentLoadId);
+    });
     resultsElement.append(card);
   }
 }
@@ -241,7 +278,7 @@ async function runSearch(rawQuery, persist = true) {
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
     if (persist && documentUrl) {
       try {
-        await DocumentIndexStorage.saveSearchTerm(documentUrl, "");
+        await DocumentIndexStorage.saveSearchResults(documentUrl, "", []);
       } catch (error) {
         if (searchId === currentSearchId && loadId === currentLoadId) {
           setStatus(`Could not save search term: ${error.message}`, "error");
@@ -256,7 +293,8 @@ async function runSearch(rawQuery, persist = true) {
       invertedIndex,
       permutermIndex,
       indexedPages,
-      query
+      query,
+      { includeSnippets: false }
     );
     if (searchId !== currentSearchId || loadId !== currentLoadId) return;
     const suggestions = results.length === 0
@@ -266,7 +304,7 @@ async function runSearch(rawQuery, persist = true) {
     setStatus(`Index ready · ${extractedCharacterCount.toLocaleString()} characters`);
     if (persist && documentUrl) {
       try {
-        await DocumentIndexStorage.saveSearchTerm(documentUrl, query);
+        await DocumentIndexStorage.saveSearchResults(documentUrl, query, results);
       } catch (error) {
         if (searchId === currentSearchId && loadId === currentLoadId) {
           setStatus(
@@ -398,6 +436,7 @@ async function loadActiveTabText(forceRefresh = false) {
     updateDocumentInfo(title, documentUrl);
 
     const savedQuery = await DocumentIndexStorage.getSearchTerm(documentUrl);
+    const savedResults = await DocumentIndexStorage.getSearchResults(documentUrl);
     if (loadId !== currentLoadId) return;
     searchInput.value = savedQuery;
 
@@ -415,7 +454,9 @@ async function loadActiveTabText(forceRefresh = false) {
             `Restored saved index · ${extractedCharacterCount.toLocaleString()} characters`,
             "ready"
           );
-          if (savedQuery) {
+          if (savedQuery && Array.isArray(savedResults)) {
+            renderResults(savedResults);
+          } else if (savedQuery) {
             await runSearch(savedQuery, false);
           } else {
             showMessage("Search this saved document by a word prefix, wildcard, or phrase.");

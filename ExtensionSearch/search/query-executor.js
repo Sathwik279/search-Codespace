@@ -117,7 +117,22 @@
       .filter((suggestion) => suggestion.toLowerCase() !== query.toLowerCase());
   }
 
-  function search(index, permutermIndex, pageTexts, query) {
+  function createSnippet(pageText, occurrence) {
+    const snippetStart = Math.max(0, occurrence.position - 70);
+    const snippetEnd = Math.min(pageText.length, occurrence.end + 70);
+    const snippet = pageText.slice(snippetStart, snippetEnd);
+    return {
+      snippet,
+      leadingEllipsis: snippetStart > 0,
+      trailingEllipsis: snippetEnd < pageText.length,
+      matchStart: occurrence.position - snippetStart,
+      matchEnd: occurrence.end - snippetStart,
+      position: occurrence.position,
+      terms: occurrence.terms
+    };
+  }
+
+  function search(index, permutermIndex, pageTexts, query, options = {}) {
     if (!index || typeof index.prefixSearch !== "function") {
       throw new TypeError("Search index must support prefixSearch(prefix).");
     }
@@ -218,29 +233,25 @@
       }
     }
 
-    const formatResult = (page, pageOccurrences, pageText) => {
-      const occurrences = pageOccurrences
+    const formatMetadata = (page, pageOccurrences) => ({
+      page,
+      occurrenceCount: pageOccurrences.length,
+      occurrences: pageOccurrences
         .sort((left, right) => left.position - right.position)
-        .map((occurrence) => {
-          const snippetStart = Math.max(0, occurrence.position - 70);
-          const snippetEnd = Math.min(pageText.length, occurrence.end + 70);
-          const snippet = pageText.slice(snippetStart, snippetEnd);
-          return {
-            snippet,
-            leadingEllipsis: snippetStart > 0,
-            trailingEllipsis: snippetEnd < pageText.length,
-            matchStart: occurrence.position - snippetStart,
-            matchEnd: occurrence.end - snippetStart,
-            position: occurrence.position,
-            terms: occurrence.terms
-          };
-        });
-      return {
+        .map((occurrence) => ({ ...occurrence }))
+    });
+    const metadataResults = Array.from(resultsByPage, ([page, pageOccurrences]) =>
+      formatMetadata(page, pageOccurrences)
+    ).sort((left, right) => left.page - right.page);
+    if (options.includeSnippets === false) return metadataResults;
+
+    const formatResult = (page, pageOccurrences, pageText) => ({
         page,
-        occurrenceCount: occurrences.length,
-        occurrences
-      };
-    };
+        occurrenceCount: pageOccurrences.length,
+        occurrences: pageOccurrences
+          .sort((left, right) => left.position - right.position)
+          .map((occurrence) => createSnippet(pageText, occurrence))
+    });
     if (isLazyPageTextSource) {
       return Promise.all(
         Array.from(resultsByPage, async ([page, pageOccurrences]) =>
@@ -253,7 +264,7 @@
     ).sort((left, right) => left.page - right.page);
   }
 
-  const executor = { search, suggest };
+  const executor = { search, suggest, createSnippet };
   global.SearchQueryExecutor = executor;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = executor;
