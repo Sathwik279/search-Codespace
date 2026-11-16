@@ -32,41 +32,51 @@ vocabulary saturates quickly (Heaps' Law) and B+ Tree insertions stay O(log n).
 
 ## 2. Storage — Delta/VByte Posting Lists + gzip Compression
 
-> `BEFORE` = JSON size of the delta/VByte-encoded index payload before gzip.
-> `AFTER`  = gzip-compressed index size (CompressionStream, level 6) stored in IndexedDB.
+The downloaded report is not an apples-to-apples baseline: it was produced by a
+different benchmark run and did not measure the current serializer. The table
+below expands the current posting streams back to the old `{ page, positions,
+ordinals }` JSON shape, then runs both formats through the same gzip benchmark.
+
+> `BEFORE` = reconstructed legacy posting JSON, before gzip.
+> `AFTER` = packed delta/VByte posting streams, before gzip.
+> `GZIP BEFORE/AFTER` = the same two payloads compressed at level 6.
 
 ### 2a. Total Storage
 
-| Tier | Pages | BEFORE (MB) | AFTER gzip (MB) | Reduction | Compression Ratio |
+| Tier | Pages | BEFORE (MB) | AFTER (MB) | Raw Reduction | GZIP BEFORE → AFTER |
 |---|---|---|---|---|---|
-| Small Paper | 20 | 8.36 | **0.89** | −89 % | 9.39× |
-| Medium Report | 100 | 24.32 | **2.48** | −90 % | 9.81× |
-| Standard Textbook | 500 | 45.65 | **4.22** | −91 % | 10.82× |
-| Large Corpus | 1 500 | 88.05 | **7.54** | −91 % | 11.68× |
-| Extreme Stress | 6 000 | 247.74 | **20.52** | −92 % | 12.07× |
+| Small Paper | 20 | 10.89 | **10.88** | 0.1% | 0.92 → **0.91 MB** |
+| Medium Report | 100 | 30.37 | **29.75** | 2.0% | 2.53 → **2.50 MB** |
+| Standard Textbook | 500 | 43.33 | **36.50** | 15.8% | 4.10 → **3.75 MB** |
+| Large Corpus | 1 500 | 61.84 | **39.38** | 36.3% | 6.96 → **5.63 MB** |
+| Extreme Stress | 6 000 | 132.04 | **50.20** | 62.0% | 17.98 → **12.53 MB** |
 
-### 2b. Per-Component Storage Breakdown — BEFORE compression (KB)
+The gain is small for short documents because posting-list metadata dominates.
+It becomes material as repeated terms create longer posting streams: 30.3%
+smaller after gzip at 6,000 pages.
 
-| Tier | B+ Tree (KB) | Permuterm (KB) | Trigram (KB) | Total (MB) |
+### 2b. Posting Component — Legacy vs Packed JSON (KB)
+
+| Tier | Pages | Legacy B+ Tree | Packed B+ Tree | Reduction |
 |---|---|---|---|---|
-| Small Paper | 1 078.1 | 6 461.6 | 1 022.7 | 8.36 |
-| Medium Report | 4 645.8 | 17 515.1 | 2 738.1 | 24.32 |
-| Standard Textbook | 22 652.2 | 20 835.5 | 3 255.9 | 45.65 |
-| Large Corpus | 66 072.9 | 20 834.1 | 3 255.9 | 88.05 |
-| Extreme Stress | 229 581.9 | 20 844.5 | 3 255.9 | 247.74 |
+| Small Paper | 20 | 647.9 | 640.3 | 1.2% |
+| Medium Report | 100 | 2 506.7 | 1 870.5 | 25.4% |
+| Standard Textbook | 500 | 10 419.4 | 3 418.5 | 67.2% |
+| Large Corpus | 1 500 | 29 391.1 | 6 389.0 | 78.3% |
+| Extreme Stress | 6 000 | 101 274.7 | 17 472.5 | 82.7% |
 
 **Observation:** Permuterm and Trigram plateau at ~20 MB and ~3.26 MB respectively
 after vocabulary saturation (~500 pages). Only B+ Tree keeps growing with document count.
 
-### 2c. Per-Component Storage Breakdown — AFTER gzip compression (KB)
+### 2c. Gzip Component — Packed Index (KB)
 
-| Tier | B+ Tree (KB) | Permuterm (KB) | Trigram (KB) | Total (MB) |
+| Tier | B+ Tree | Permuterm | Trigram | Total |
 |---|---|---|---|---|
-| Small Paper | 90.9 | 720.5 | 101.7 | 0.89 |
-| Medium Report | 382.2 | 1 889.0 | 268.2 | 2.48 |
-| Standard Textbook | 1 768.8 | 2 232.2 | 316.7 | 4.22 |
-| Large Corpus | 5 172.6 | 2 231.9 | 315.2 | 7.54 |
-| Extreme Stress | 18 465.7 | 2 232.0 | 314.7 | 20.52 |
+| Small Paper | 79.0 KB | 758.5 KB | 97.0 KB | 0.91 MB |
+| Medium Report | 306.2 KB | 1 986.9 KB | 268.2 KB | 2.50 MB |
+| Standard Textbook | 1 174.2 KB | 2 343.7 KB | 318.6 KB | 3.75 MB |
+| Large Corpus | 3 108.6 KB | 2 342.4 KB | 317.6 KB | 5.63 MB |
+| Extreme Stress | 10 176.6 KB | 2 342.3 KB | 313.2 KB | 12.53 MB |
 
 **Observation:** Permuterm compresses from ~20 MB → ~2.2 MB (9× ratio) because rotations
 share long common prefixes. Trigram compresses from ~3.26 MB → ~314 KB (10× ratio).

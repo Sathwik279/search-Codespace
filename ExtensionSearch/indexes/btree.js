@@ -357,14 +357,7 @@ class StringBTree {
                 serializedNode.nextLeaf = node.nextLeaf === null ? null : node.nextLeaf.keys[0];
                 serializedNode.postings = node.postings
                     .slice(0, node.numKeys)
-                    .map((postingList) => postingList.map((posting) => ({
-                        page: posting.page,
-                        positions: StringBTree._encodeVByte(posting.positions),
-                        ordinals: StringBTree._encodeVByte(posting.ordinals),
-                        positionCount: posting.positions.length,
-                        ordinalCount: posting.ordinals.length,
-                        encoding: "delta-vbyte"
-                    })));
+                    .map((postingList) => StringBTree._encodePostingList(postingList));
             }
             return serializedNode;
         };
@@ -434,34 +427,41 @@ class StringBTree {
             if (
                 !Array.isArray(data.postings) ||
                 data.postings.length !== data.numKeys ||
-                !data.postings.every((postingList) =>
-                    Array.isArray(postingList) &&
-                    postingList.every((posting) => {
+                !data.postings.every((postingList) => {
+                    if (postingList?.encoding === "delta-vbyte") {
+                        return typeof postingList.data === "string" &&
+                            Number.isInteger(postingList.count) &&
+                            postingList.count >= 0;
+                    }
+                    return Array.isArray(postingList) &&
+                        postingList.every((posting) => {
                         if (
                             !Number.isInteger(posting?.page) ||
-                            posting.page < 1 ||
-                            !Array.isArray(posting.positions) ||
-                            !Array.isArray(posting.ordinals)
+                            posting.page < 1
                         ) return false;
                         if (posting.encoding === "delta-vbyte") {
                             return Number.isInteger(posting.positionCount) &&
                                 posting.positionCount >= 0 &&
-                                posting.positionCount === posting.ordinalCount;
+                                posting.positionCount === posting.ordinalCount &&
+                                typeof posting.positions === "string" &&
+                                typeof posting.ordinals === "string";
                         }
-                        return posting.ordinals.length === posting.positions.length &&
+                        return Array.isArray(posting.positions) &&
+                            Array.isArray(posting.ordinals) &&
+                            posting.ordinals.length === posting.positions.length &&
                             posting.positions.every(
                                 (position) => Number.isInteger(position) && position >= 0
                             ) &&
                             posting.ordinals.every(
                                 (ordinal) => Number.isInteger(ordinal) && ordinal >= 0
                             );
-                    })
-                )
+                        });
+                })
             ) {
                 throw new TypeError("Stored B-tree postings are invalid.");
             }
             node.postings = data.postings.map((postingList) =>
-                postingList.map((posting) => StringBTree._decodePosting(posting))
+                StringBTree._decodePostingList(postingList)
             );
             leaves.push({ node, nextLeaf: data.nextLeaf });
         } else {
@@ -527,16 +527,101 @@ class StringBTree {
         return encoded;
     }
 
+    static _appendVByte(bytes, value) {
+        while (value >= 128) {
+            bytes.push((value & 127) | 128);
+            value >>>= 7;
+        }
+        bytes.push(value);
+    }
+
+    static _readVByte(bytes, state) {
+        let value = 0;
+        let shift = 0;
+        while (state.index < bytes.length) {
+            const byte = bytes[state.index++];
+            value |= (byte & 127) << shift;
+            if ((byte & 128) === 0) return value >>> 0;
+            shift += 7;
+            if (shift > 28) throw new TypeError("Stored compressed posting data is invalid.");
+        }
+        throw new TypeError("Stored compressed posting data is invalid.");
+    }
+
+    static _encodePostingList(postingList) {
+        const bytes = [];
+        let previousPage = 0;
+        for (const posting of postingList) {
+            StringBTree._appendVByte(bytes, posting.page - previousPage);
+            previousPage = posting.page;
+            StringBTree._appendVByte(bytes, posting.positions.length);
+            let previousPosition = 0;
+            for (const position of posting.positions) {
+                StringBTree._appendVByte(bytes, position - previousPosition);
+                previousPosition = position;
+            }
+            let previousOrdinal = 0;
+            for (const ordinal of posting.ordinals) {
+                StringBTree._appendVByte(bytes, ordinal - previousOrdinal);
+                previousOrdinal = ordinal;
+            }
+        }
+        return {
+            encoding: "delta-vbyte",
+            data: StringBTree._toBase64(bytes),
+            count: postingList.length
+        };
+    }
+
+    static _decodePostingList(serialized) {
+        if (serialized?.encoding === "delta-vbyte") {
+            const bytes = StringBTree._fromBase64(serialized.data);
+            if (!Number.isInteger(serialized.count) || serialized.count < 0) {
+                throw new TypeError("Stored compressed posting data is invalid.");
+            }
+            const postings = [];
+            const state = { index: 0 };
+            let previousPage = 0;
+            for (let group = 0; group < serialized.count; group += 1) {
+                const page = previousPage + StringBTree._readVByte(bytes, state);
+                const valueCount = StringBTree._readVByte(bytes, state);
+                const positions = new Uint32Array(valueCount);
+                const ordinals = new Uint32Array(valueCount);
+                let previousPosition = 0;
+                let previousOrdinal = 0;
+                for (let index = 0; index < valueCount; index += 1) {
+                    previousPosition += StringBTree._readVByte(bytes, state);
+                    positions[index] = previousPosition;
+                }
+                for (let index = 0; index < valueCount; index += 1) {
+                    previousOrdinal += StringBTree._readVByte(bytes, state);
+                    ordinals[index] = previousOrdinal;
+                }
+                postings.push({ page, positions, ordinals });
+                previousPage = page;
+            }
+            if (state.index !== bytes.length) {
+                throw new TypeError("Stored compressed posting data is invalid.");
+            }
+            return postings;
+        }
+        if (!Array.isArray(serialized)) {
+            throw new TypeError("Stored B-tree postings are invalid.");
+        }
+        return serialized.map((posting) => StringBTree._decodePosting(posting));
+    }
+
     static _decodeVByte(values, count) {
-        if (!Array.isArray(values) || !Number.isInteger(count) || count < 0) {
+        if (!Number.isInteger(count) || count < 0) {
             throw new TypeError("Stored compressed posting data is invalid.");
         }
+        const bytes = StringBTree._fromBase64(values);
         const decoded = new Uint32Array(count);
         let value = 0;
         let shift = 0;
         let previous = 0;
         let outputIndex = 0;
-        for (const byte of values) {
+        for (const byte of bytes) {
             if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
                 throw new TypeError("Stored compressed posting data is invalid.");
             }
@@ -560,12 +645,33 @@ class StringBTree {
         return decoded;
     }
 
+    static _toBase64(bytes) {
+        let binary = "";
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        if (typeof btoa === "function") return btoa(binary);
+        if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
+        throw new TypeError("No base64 encoder is available.");
+    }
+
+    static _fromBase64(value) {
+        if (typeof value !== "string") {
+            throw new TypeError("Stored compressed posting data is invalid.");
+        }
+        if (typeof atob === "function") {
+            const binary = atob(value);
+            return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+        }
+        if (typeof Buffer !== "undefined") return Uint8Array.from(Buffer.from(value, "base64"));
+        throw new TypeError("No base64 decoder is available.");
+    }
+
     static _decodePosting(posting) {
         if (
             !Number.isInteger(posting?.page) ||
             posting.page < 1 ||
-            !Array.isArray(posting.positions) ||
-            !Array.isArray(posting.ordinals)
+            (posting.encoding === "delta-vbyte"
+                ? typeof posting.positions !== "string" || typeof posting.ordinals !== "string"
+                : !Array.isArray(posting.positions) || !Array.isArray(posting.ordinals))
         ) {
             throw new TypeError("Stored B-tree posting is invalid.");
         }

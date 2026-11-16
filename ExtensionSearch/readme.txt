@@ -95,7 +95,8 @@ indexes/btree.js
   the maximum number of keys per node (2 * order).   insertion keeps string keys
   sorted, groups each term's character positions and token ordinals by page,
   and splits overflowing nodes. Posting positions and ordinals use Uint32Array
-  buffers in memory; serialization delta-encodes them with VByte. `search(key)` returns page posting groups for
+  buffers in memory; serialization packs each term's page posting list into one
+  delta-encoded VByte stream. `search(key)` returns page posting groups for
   an exact key; `prefixSearch(prefix)` returns matching terms and their
   postings. `serialize()` and `StringBTree.deserialize(data)` convert the
   in-memory tree to and from a structured-cloneable representation for IndexedDB.

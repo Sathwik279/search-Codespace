@@ -166,10 +166,10 @@ test("stores typed posting buffers and serializes delta VByte postings", () => {
   assert.ok(posting.ordinals instanceof Uint32Array);
 
   const serialized = tree.serialize();
-  const encoded = serialized.root.postings[0][0];
+  const encoded = serialized.root.postings[0];
   assert.equal(encoded.encoding, "delta-vbyte");
-  assert.deepEqual(encoded.positions, [100, 40]);
-  assert.deepEqual(encoded.ordinals, [4, 5]);
+  assert.equal(typeof encoded.data, "string");
+  assert.equal(encoded.count, 1);
   assert.deepEqual(
     StringBTree.deserialize(JSON.parse(JSON.stringify(serialized))).search("word"),
     [{ page: 1, positions: [100, 140], ordinals: [4, 9] }]

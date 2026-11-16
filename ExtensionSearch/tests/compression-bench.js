@@ -54,6 +54,35 @@ function simulateChromeFind(pageTexts, query) {
   return matches;
 }
 
+function expandLegacyTerms(node) {
+  if (node === null) return null;
+  const expanded = {
+    isLeaf: node.isLeaf,
+    numKeys: node.numKeys,
+    keys: node.keys.slice(),
+    pointers: node.isLeaf ? [] : node.pointers.map(expandLegacyTerms)
+  };
+  if (node.isLeaf) {
+    expanded.nextLeaf = node.nextLeaf;
+    expanded.postings = node.postings.map((serializedPostingList) => {
+      const postingList = serializedPostingList.encoding
+        ? StringBTree._decodePostingList(serializedPostingList)
+        : serializedPostingList;
+      return postingList.map((posting) => {
+        const decoded = posting.positions instanceof Uint32Array
+          ? posting
+          : StringBTree._decodePosting(posting);
+        return {
+          page: decoded.page,
+          positions: Array.from(decoded.positions),
+          ordinals: Array.from(decoded.ordinals)
+        };
+      });
+    });
+  }
+  return expanded;
+}
+
 async function run() {
   const tiers = [
     { name: "Small Paper",          pages: 20,   wordsPerPage: 350 },
@@ -88,19 +117,32 @@ async function run() {
     // --- Serialise (uncompressed JSON) ---
     const t0Ser = performance.now();
     const rawTerms = JSON.stringify(buildResult.index.serialize());
+    const legacyTerms = JSON.stringify(expandLegacyTerms(buildResult.index.serialize().root));
     const rawPerm  = JSON.stringify(buildResult.permutermIndex.serialize());
     const rawTrig  = JSON.stringify(buildResult.trigramIndex.serialize());
     const serTimeMs = (performance.now() - t0Ser).toFixed(1);
 
     const uncompTermsKB = (rawTerms.length / 1024).toFixed(2);
+    const legacyTermsKB = (legacyTerms.length / 1024).toFixed(2);
     const uncompPermKB  = (rawPerm.length  / 1024).toFixed(2);
     const uncompTrigKB  = (rawTrig.length  / 1024).toFixed(2);
     const uncompTotalMB = ((rawTerms.length + rawPerm.length + rawTrig.length) / (1024 * 1024)).toFixed(2);
+    const legacyTotalMB = ((legacyTerms.length + rawPerm.length + rawTrig.length) / (1024 * 1024)).toFixed(2);
 
     // --- Compress with gzip ---
     const t0Gz = performance.now();
-    const combined = JSON.stringify({ terms: rawTerms, perm: rawPerm, trig: rawTrig });
+    const combined = JSON.stringify({
+      terms: JSON.parse(rawTerms),
+      perm: JSON.parse(rawPerm),
+      trig: JSON.parse(rawTrig)
+    });
+    const legacyCombined = JSON.stringify({
+      terms: JSON.parse(legacyTerms),
+      perm: JSON.parse(rawPerm),
+      trig: JSON.parse(rawTrig)
+    });
     const gzBuf = await gzip(Buffer.from(combined, "utf8"), { level: 6 });
+    const legacyGzBuf = await gzip(Buffer.from(legacyCombined, "utf8"), { level: 6 });
     const gzTimeMs = (performance.now() - t0Gz).toFixed(1);
 
     // Also compress per-component for breakdown
@@ -115,6 +157,8 @@ async function run() {
     const compTrigKB  = (gzTrigBuf.length  / 1024).toFixed(2);
     const compTotalMB = ((gzTermsBuf.length + gzPermBuf.length + gzTrigBuf.length) / (1024 * 1024)).toFixed(2);
     const ratio       = (Number(uncompTotalMB) / Number(compTotalMB)).toFixed(2);
+    const legacyCompTotalMB = (legacyGzBuf.length / (1024 * 1024)).toFixed(2);
+    const postingReduction = ((1 - Number(compTotalMB) / Number(legacyCompTotalMB)) * 100).toFixed(1);
 
     // --- Query latency ---
     const testQueries = ["algorithm", "database", "retrieval", "vector", "search"];
@@ -146,15 +190,19 @@ async function run() {
       totalRssMB:     Number(totalRssMB),
       // Uncompressed
       uncompTermsKB:  Number(uncompTermsKB),
+      legacyTermsKB: Number(legacyTermsKB),
       uncompPermKB:   Number(uncompPermKB),
       uncompTrigKB:   Number(uncompTrigKB),
       uncompTotalMB:  Number(uncompTotalMB),
+      legacyTotalMB: Number(legacyTotalMB),
       // Compressed
       compTermsKB:    Number(compTermsKB),
       compPermKB:     Number(compPermKB),
       compTrigKB:     Number(compTrigKB),
       compTotalMB:    Number(compTotalMB),
       compressionRatio: Number(ratio),
+      legacyCompressedTotalMB: Number(legacyCompTotalMB),
+      postingCompressionReductionPercent: Number(postingReduction),
       // Latency
       avgChromeMs:    Number(avgChromeMs),
       avgBtreeMs:     Number(avgBtreeMs),
@@ -165,7 +213,7 @@ async function run() {
     console.log(
       `[DONE] ${tier.name}: ${tier.pages}p | ` +
       `Build: ${indexTimeMs}ms | ` +
-      `Uncomp: ${uncompTotalMB}MB → Gzip: ${compTotalMB}MB (${ratio}x) | ` +
+      `Legacy gzip: ${legacyCompTotalMB}MB → Delta/VByte gzip: ${compTotalMB}MB (${postingReduction}% smaller) | ` +
       `RSS: ${totalRssMB}MB | Chrome: ${avgChromeMs}ms | BTree: ${avgBtreeMs}ms`
     );
   }
