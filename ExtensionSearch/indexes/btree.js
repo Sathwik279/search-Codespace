@@ -272,7 +272,11 @@ class StringBTree {
             let idx = this.lowerBound(0, curr.numKeys - 1, key, curr.keys);
             if (curr.isLeaf) {
                 if (idx < curr.numKeys && curr.keys[idx] === key) {
-                    return curr.postings[idx];
+                    return curr.postings[idx].map((posting) => ({
+                        page: posting.page,
+                        positions: Array.from(posting.positions),
+                        ordinals: Array.from(posting.ordinals)
+                    }));
                 }
                 return null;
             }
@@ -318,7 +322,14 @@ class StringBTree {
             for (let index = keyIdx; index < curr.numKeys; index += 1) {
                 const key = curr.keys[index];
                 if (!key.startsWith(prefix)) return matches;
-                matches.push({ key, postings: curr.postings[index] });
+                matches.push({
+                    key,
+                    postings: curr.postings[index].map((posting) => ({
+                        page: posting.page,
+                        positions: Array.from(posting.positions),
+                        ordinals: Array.from(posting.ordinals)
+                    }))
+                });
             }
 
             curr = curr.nextLeaf;
@@ -347,13 +358,12 @@ class StringBTree {
                 serializedNode.postings = node.postings
                     .slice(0, node.numKeys)
                     .map((postingList) => postingList.map((posting) => ({
-                        ...posting,
-                        positions: Array.isArray(posting.positions)
-                            ? posting.positions.slice()
-                            : posting.positions,
-                        ordinals: Array.isArray(posting.ordinals)
-                            ? posting.ordinals.slice()
-                            : posting.ordinals
+                        page: posting.page,
+                        positions: StringBTree._encodeVByte(posting.positions),
+                        ordinals: StringBTree._encodeVByte(posting.ordinals),
+                        positionCount: posting.positions.length,
+                        ordinalCount: posting.ordinals.length,
+                        encoding: "delta-vbyte"
                     })));
             }
             return serializedNode;
@@ -424,33 +434,34 @@ class StringBTree {
             if (
                 !Array.isArray(data.postings) ||
                 data.postings.length !== data.numKeys ||
-                !data.postings.every(
-                    (postingList) =>
-                        Array.isArray(postingList) &&
-                        postingList.every(
-                            (posting) =>
-                                Number.isInteger(posting?.page) &&
-                                posting.page > 0 &&
-                                Array.isArray(posting.positions) &&
-                                Array.isArray(posting.ordinals) &&
-                                posting.ordinals.length === posting.positions.length &&
-                                posting.positions.every(
-                                    (position) => Number.isInteger(position) && position >= 0
-                                ) &&
-                                posting.ordinals.every(
-                                    (ordinal) => Number.isInteger(ordinal) && ordinal >= 0
-                                )
-                        )
+                !data.postings.every((postingList) =>
+                    Array.isArray(postingList) &&
+                    postingList.every((posting) => {
+                        if (
+                            !Number.isInteger(posting?.page) ||
+                            posting.page < 1 ||
+                            !Array.isArray(posting.positions) ||
+                            !Array.isArray(posting.ordinals)
+                        ) return false;
+                        if (posting.encoding === "delta-vbyte") {
+                            return Number.isInteger(posting.positionCount) &&
+                                posting.positionCount >= 0 &&
+                                posting.positionCount === posting.ordinalCount;
+                        }
+                        return posting.ordinals.length === posting.positions.length &&
+                            posting.positions.every(
+                                (position) => Number.isInteger(position) && position >= 0
+                            ) &&
+                            posting.ordinals.every(
+                                (ordinal) => Number.isInteger(ordinal) && ordinal >= 0
+                            );
+                    })
                 )
             ) {
                 throw new TypeError("Stored B-tree postings are invalid.");
             }
             node.postings = data.postings.map((postingList) =>
-                postingList.map((posting) => ({
-                    ...posting,
-                    positions: posting.positions.slice(),
-                    ordinals: posting.ordinals.slice()
-                }))
+                postingList.map((posting) => StringBTree._decodePosting(posting))
             );
             leaves.push({ node, nextLeaf: data.nextLeaf });
         } else {
@@ -478,21 +489,101 @@ class StringBTree {
             const lastPosting = postings[postings.length - 1];
             if (
                 lastPosting?.page === posting.page &&
-                Array.isArray(lastPosting.positions) &&
-                Array.isArray(lastPosting.ordinals)
+                lastPosting.positions instanceof Uint32Array &&
+                lastPosting.ordinals instanceof Uint32Array
             ) {
-                lastPosting.positions.push(posting.position);
-                lastPosting.ordinals.push(posting.ordinal);
+                const positions = new Uint32Array(lastPosting.positions.length + 1);
+                positions.set(lastPosting.positions);
+                positions[positions.length - 1] = posting.position;
+                const ordinals = new Uint32Array(lastPosting.ordinals.length + 1);
+                ordinals.set(lastPosting.ordinals);
+                ordinals[ordinals.length - 1] = posting.ordinal;
+                lastPosting.positions = positions;
+                lastPosting.ordinals = ordinals;
             } else {
                 postings.push({
                     page: posting.page,
-                    positions: [posting.position],
-                    ordinals: [posting.ordinal]
+                    positions: Uint32Array.of(posting.position),
+                    ordinals: Uint32Array.of(posting.ordinal)
                 });
             }
             return;
         }
         throw new TypeError("Posting must include a positive page and nonnegative position and ordinal.");
+    }
+
+    static _encodeVByte(values) {
+        const encoded = [];
+        let previous = 0;
+        for (const value of values) {
+            let delta = value - previous;
+            previous = value;
+            while (delta >= 128) {
+                encoded.push((delta & 127) | 128);
+                delta >>>= 7;
+            }
+            encoded.push(delta);
+        }
+        return encoded;
+    }
+
+    static _decodeVByte(values, count) {
+        if (!Array.isArray(values) || !Number.isInteger(count) || count < 0) {
+            throw new TypeError("Stored compressed posting data is invalid.");
+        }
+        const decoded = new Uint32Array(count);
+        let value = 0;
+        let shift = 0;
+        let previous = 0;
+        let outputIndex = 0;
+        for (const byte of values) {
+            if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
+                throw new TypeError("Stored compressed posting data is invalid.");
+            }
+            value |= (byte & 127) << shift;
+            if ((byte & 128) === 0) {
+                previous += value;
+                if (outputIndex >= count || previous > 0xffffffff) {
+                    throw new TypeError("Stored compressed posting data is invalid.");
+                }
+                decoded[outputIndex++] = previous;
+                value = 0;
+                shift = 0;
+            } else {
+                shift += 7;
+                if (shift > 28) throw new TypeError("Stored compressed posting data is invalid.");
+            }
+        }
+        if (outputIndex !== count || shift !== 0) {
+            throw new TypeError("Stored compressed posting data is invalid.");
+        }
+        return decoded;
+    }
+
+    static _decodePosting(posting) {
+        if (
+            !Number.isInteger(posting?.page) ||
+            posting.page < 1 ||
+            !Array.isArray(posting.positions) ||
+            !Array.isArray(posting.ordinals)
+        ) {
+            throw new TypeError("Stored B-tree posting is invalid.");
+        }
+        if (posting.encoding === "delta-vbyte") {
+            if (posting.positionCount !== posting.ordinalCount) {
+                throw new TypeError("Stored B-tree posting counts are invalid.");
+            }
+            return {
+                page: posting.page,
+                positions: StringBTree._decodeVByte(posting.positions, posting.positionCount),
+                ordinals: StringBTree._decodeVByte(posting.ordinals, posting.ordinalCount)
+            };
+        }
+        return {
+            page: posting.page,
+            positions: Uint32Array.from(posting.positions),
+            ordinals: Uint32Array.from(posting.ordinals)
+        };
     }
 
     printTree() {

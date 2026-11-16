@@ -26,8 +26,9 @@
       throw new TypeError("Index builder callbacks must be functions.");
     }
 
-    const index = new StringBTree(2);
-    const permutermIndex = new PermutermIndex(2);
+    const order = Number.isInteger(options.order) && options.order >= 1 ? options.order : 2;
+    const index = new StringBTree(order);
+    const permutermIndex = new PermutermIndex(order);
     const trigramIndex = new TrigramIndex();
     const indexedTerms = new Set();
     let indexedWordCount = 0;

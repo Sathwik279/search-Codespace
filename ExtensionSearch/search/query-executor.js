@@ -127,11 +127,16 @@
     ) {
       throw new TypeError("Permuterm index must support prefixSearch(prefix).");
     }
+    const isLazyPageTextSource =
+      pageTexts &&
+      Number.isInteger(pageTexts.length) &&
+      typeof pageTexts.getPageText === "function";
     if (
-      !Array.isArray(pageTexts) ||
-      !pageTexts.every((pageText) => typeof pageText === "string")
+      (!Array.isArray(pageTexts) && !isLazyPageTextSource) ||
+      (Array.isArray(pageTexts) &&
+        !pageTexts.every((pageText) => typeof pageText === "string"))
     ) {
-      throw new TypeError("Page texts must be an array of strings.");
+      throw new TypeError("Page texts must be an array or lazy page text source.");
     }
 
     if (typeof query !== "string") {
@@ -152,7 +157,9 @@
       for (const matchingTerm of matchingTerms) {
         for (const pagePosting of matchingTerm.postings) {
           if (
+            !ArrayBuffer.isView(pagePosting.positions) &&
             !Array.isArray(pagePosting.positions) ||
+            !ArrayBuffer.isView(pagePosting.ordinals) &&
             !Array.isArray(pagePosting.ordinals) ||
             pagePosting.positions.length !== pagePosting.ordinals.length
           ) {
@@ -211,8 +218,7 @@
       }
     }
 
-    return Array.from(resultsByPage, ([page, pageOccurrences]) => {
-      const pageText = pageTexts[page - 1] || "";
+    const formatResult = (page, pageOccurrences, pageText) => {
       const occurrences = pageOccurrences
         .sort((left, right) => left.position - right.position)
         .map((occurrence) => {
@@ -234,7 +240,17 @@
         occurrenceCount: occurrences.length,
         occurrences
       };
-    }).sort((left, right) => left.page - right.page);
+    };
+    if (isLazyPageTextSource) {
+      return Promise.all(
+        Array.from(resultsByPage, async ([page, pageOccurrences]) =>
+          formatResult(page, pageOccurrences, (await pageTexts.getPageText(page)) || "")
+        )
+      ).then((results) => results.sort((left, right) => left.page - right.page));
+    }
+    return Array.from(resultsByPage, ([page, pageOccurrences]) =>
+      formatResult(page, pageOccurrences, pageTexts[page - 1] || "")
+    ).sort((left, right) => left.page - right.page);
   }
 
   const executor = { search, suggest };

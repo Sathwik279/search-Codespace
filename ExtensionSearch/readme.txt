@@ -9,8 +9,8 @@ parsed locally with PDF.js, avoiding dependence on Chrome's built-in PDF
 viewer DOM. Other HTTP(S) webpages are read by an injected content script.
 
 The extension builds an in-memory term B-tree, permuterm B-tree, and trigram
-index, then persists the serialized indexes, page text, and the last search term
-in IndexedDB. Reopening the side panel for the same document restores its
+index, then persists the serialized indexes, page text records, and the last search
+term in IndexedDB. Reopening the side panel for the same document restores its
 indexes without extracting or tokenizing the document again. A refresh button
 explicitly rebuilds the saved indexes.
 
@@ -92,9 +92,10 @@ indexes/
 
 indexes/btree.js
   Defines StringBTree and its node structure. The configurable order controls
-  the maximum number of keys per node (2 * order). Insertion keeps string keys
+  the maximum number of keys per node (2 * order).   insertion keeps string keys
   sorted, groups each term's character positions and token ordinals by page,
-  and splits overflowing nodes. `search(key)` returns page posting groups for
+  and splits overflowing nodes. Posting positions and ordinals use Uint32Array
+  buffers in memory; serialization delta-encodes them with VByte. `search(key)` returns page posting groups for
   an exact key; `prefixSearch(prefix)` returns matching terms and their
   postings. `serialize()` and `StringBTree.deserialize(data)` convert the
   in-memory tree to and from a structured-cloneable representation for IndexedDB.
@@ -106,9 +107,10 @@ indexes/permuterm-index.js
   them together.
 
 index-storage.js
-  Stores each document's page text and serialized term, permuterm, and trigram
-  indexes in the extension's IndexedDB database. It separately stores the last
-  search term by document URL so typing a query does not rewrite the indexes.
+  Stores serialized term, permuterm, and trigram indexes plus one page-text record
+  per document page in IndexedDB. Native CompressionStream('gzip') compresses the
+  index payload when available. SearchQueryExecutor loads only matched page text
+  records for snippets, and separately stores the last search term by URL.
 
 pdfjs/
   Contains the locally bundled PDF.js 3.11.174 library (`pdf.min.js`), its
@@ -283,7 +285,7 @@ belongs to `node.keys[i]`; internal nodes have no posting lists.
   other text and may also match a search query.
 
 Search operates on the in-memory tree after extraction or restore. IndexedDB
-persists a serialized copy and page text locally; it does not make the B-tree
+persists a compressed serialized copy and page text records locally; it does not make the B-tree
 itself a disk-based tree, provide fixed-size block access, or change node
 operations into disk I/O.
 
@@ -309,8 +311,8 @@ Permissions, privacy, and limitations
   opened, so the improved extraction and compact posting format are applied to
   existing documents. An informational console message about an older index
   means it is being rebuilt; it is not itself an indexing failure.
-- Very large PDFs can still require substantial memory because PDF.js must
-  parse the document and the extension retains page text for snippets. The
+- Very large PDFs can still require substantial memory while PDF.js parses the
+  document, but restored searches lazy-load only matched page text for snippets. The
   bundled stress fixture has 6,061 pages; allow indexing time and avoid
   refreshing it repeatedly if the browser reports memory pressure.
 - Ordinary pages must expose readable text in the DOM. Chrome does not allow

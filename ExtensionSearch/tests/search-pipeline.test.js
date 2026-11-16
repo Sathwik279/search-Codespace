@@ -108,6 +108,32 @@ test("query executor uses single-word prefixes and returns unranked occurrences"
   assert.equal(Object.hasOwn(results[0], "score"), false);
 });
 
+test("query executor loads only matched pages from a lazy page text source", async () => {
+  const pageTexts = ["alpha beta", "unrelated text"];
+  const { index, permutermIndex } = await SearchIndexBuilder.build(pageTexts);
+  const loadedPages = [];
+  const lazyPages = {
+    length: pageTexts.length,
+    getPageText: async (page) => {
+      loadedPages.push(page);
+      return pageTexts[page - 1];
+    }
+  };
+
+  const results = await SearchQueryExecutor.search(
+    index,
+    permutermIndex,
+    lazyPages,
+    "alpha"
+  );
+
+  assert.deepEqual(loadedPages, [1]);
+  assert.equal(results[0].occurrences[0].snippet.slice(
+    results[0].occurrences[0].matchStart,
+    results[0].occurrences[0].matchEnd
+  ), "alpha");
+});
+
 test("query executor matches multi-word phrases using consecutive token ordinals", async () => {
   const pageTexts = [
     "quick brown fox; quick red fox",

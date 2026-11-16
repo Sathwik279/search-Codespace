@@ -16,7 +16,14 @@ let activeDocumentUrl = "";
 let activeTabId;
 let currentSearchId = 0;
 let currentLoadId = 0;
-const DOCUMENT_INDEX_VERSION = 7;
+const DOCUMENT_INDEX_VERSION = 8;
+
+function createLazyPageTextSource(url, pageCount) {
+  return {
+    length: pageCount,
+    getPageText: (page) => DocumentIndexStorage.getPageText(url, page)
+  };
+}
 
 if (globalThis.pdfjsLib) {
   globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
@@ -75,6 +82,7 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
     url: documentInfo.url,
     title: documentInfo.title,
     pageTexts,
+    characterCount: buildResult.extractedCharacterCount,
     indexes: {
       terms: buildResult.index.serialize(),
       permuterm: buildResult.permutermIndex.serialize(),
@@ -86,7 +94,7 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
 
   if (loadId !== currentLoadId) return false;
   extractedCharacterCount = buildResult.extractedCharacterCount;
-  indexedPages = pageTexts;
+  indexedPages = createLazyPageTextSource(documentInfo.url, pageTexts.length);
   invertedIndex = buildResult.index;
   permutermIndex = buildResult.permutermIndex;
   trigramIndex = buildResult.trigramIndex;
@@ -96,8 +104,11 @@ async function initializeIndex(pageTexts, documentInfo, loadId) {
 function restoreIndex(record, loadId) {
   if (
     record?.version !== DOCUMENT_INDEX_VERSION ||
-    !Array.isArray(record.pageTexts) ||
-    !record.pageTexts.every((pageText) => typeof pageText === "string")
+    !Number.isInteger(record.pageCount) ||
+    record.pageCount < 1 ||
+    (record.pageTexts !== undefined &&
+      (!Array.isArray(record.pageTexts) ||
+        !record.pageTexts.every((pageText) => typeof pageText === "string")))
   ) {
     throw new TypeError("The stored document index has an unsupported or invalid format.");
   }
@@ -106,11 +117,14 @@ function restoreIndex(record, loadId) {
   const restoredPermutermIndex = PermutermIndex.deserialize(record.indexes?.permuterm);
   const restoredTrigramIndex = TrigramIndex.deserialize(record.indexes?.trigrams);
   if (loadId !== currentLoadId) return false;
-  indexedPages = record.pageTexts;
-  extractedCharacterCount = indexedPages.reduce(
-    (total, pageText) => total + pageText.length,
-    Math.max(0, indexedPages.length - 1) * 2
-  );
+  indexedPages = record.pageTexts
+    ? record.pageTexts
+    : createLazyPageTextSource(record.url, record.pageCount);
+  extractedCharacterCount = record.characterCount ||
+    (record.pageTexts || []).reduce((total, pageText) => total + pageText.length, 0);
+  if (!record.characterCount && record.pageTexts) {
+    extractedCharacterCount += Math.max(0, record.pageTexts.length - 1) * 2;
+  }
   invertedIndex = restoredIndex;
   permutermIndex = restoredPermutermIndex;
   trigramIndex = restoredTrigramIndex;
@@ -238,7 +252,7 @@ async function runSearch(rawQuery, persist = true) {
   }
 
   try {
-    const results = SearchQueryExecutor.search(
+    const results = await SearchQueryExecutor.search(
       invertedIndex,
       permutermIndex,
       indexedPages,
