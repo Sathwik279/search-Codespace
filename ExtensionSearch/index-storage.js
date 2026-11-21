@@ -27,64 +27,6 @@
     });
   }
 
-  async function compressDocument(record) {
-    if (!record) return record;
-    const metadata = {
-      url: record.url,
-      title: record.title,
-      updatedAt: record.updatedAt,
-      version: record.version,
-      pageCount: record.pageTexts.length,
-      characterCount: record.characterCount
-    };
-    if (typeof CompressionStream !== "function") {
-      return { ...metadata, indexes: record.indexes };
-    }
-    try {
-      const heavyPayload = {
-        indexes: record.indexes
-      };
-      const json = JSON.stringify(heavyPayload);
-      const stream = new Response(
-        new Response(new TextEncoder().encode(json)).body.pipeThrough(new CompressionStream("gzip"))
-      );
-      const buffer = await stream.arrayBuffer();
-      return {
-        ...metadata,
-        isCompressed: true,
-        compressedData: buffer
-      };
-    } catch {
-      return { ...metadata, indexes: record.indexes };
-    }
-  }
-
-  async function decompressDocument(record) {
-    if (!record || !record.isCompressed || !(record.compressedData instanceof ArrayBuffer)) {
-      return record;
-    }
-    try {
-      const stream = new Response(
-        new Response(record.compressedData).body.pipeThrough(new DecompressionStream("gzip"))
-      );
-      const text = await stream.text();
-      const payload = JSON.parse(text);
-      return {
-        url: record.url,
-        title: record.title,
-        updatedAt: record.updatedAt,
-        version: record.version,
-        pageCount: record.pageCount || payload.pageTexts?.length || 0,
-        characterCount: record.characterCount ||
-          payload.pageTexts?.reduce((total, text) => total + text.length, 0) || 0,
-        pageTexts: payload.pageTexts,
-        indexes: payload.indexes
-      };
-    } catch {
-      return record;
-    }
-  }
-
   async function readRecord(storeName, url) {
     const database = await openDatabase();
     return new Promise((resolve, reject) => {
@@ -94,12 +36,7 @@
       request.onsuccess = async () => {
         try {
           const result = request.result;
-          if (storeName === DOCUMENT_STORE && result) {
-            const decompressed = await decompressDocument(result);
-            resolve(decompressed);
-          } else {
-            resolve(result);
-          }
+          resolve(result);
         } catch (err) {
           reject(err);
         }
@@ -121,7 +58,10 @@
       throw new TypeError("Document records must include page text strings.");
     }
     const database = await openDatabase();
-    const payloadToSave = await compressDocument(record);
+    const payloadToSave = {
+      ...record,
+      pageCount: record.pageTexts.length
+    };
     return new Promise((resolve, reject) => {
       const transaction = database.transaction([DOCUMENT_STORE, PAGE_STORE], "readwrite");
       transaction.objectStore(DOCUMENT_STORE).put(payloadToSave);

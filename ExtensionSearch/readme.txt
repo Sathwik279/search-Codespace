@@ -97,7 +97,7 @@ indexes/btree.js
   sorted, groups each term's character positions and token ordinals by page,
   and splits overflowing nodes. Posting positions and ordinals use Uint32Array
   buffers in memory; serialization packs each term's page posting list into one
-  delta-encoded VByte stream. `search(key)` returns page posting groups for
+  delta-encoded posting stream. `search(key)` returns page posting groups for
   an exact key; `prefixSearch(prefix)` returns matching terms and their
   postings. `serialize()` and `StringBTree.deserialize(data)` convert the
   in-memory tree to and from a structured-cloneable representation for IndexedDB.
@@ -110,8 +110,8 @@ indexes/permuterm-index.js
 
 index-storage.js
   Stores serialized term, permuterm, and trigram indexes plus one page-text record
-  per document page in IndexedDB. Native CompressionStream('gzip') compresses the
-  index payload when available. It also stores query match metadata without
+  per document page in IndexedDB. The plain payload is stored without whole-index
+  gzip compression; posting lists use only delta encoding. It also stores query match metadata without
   snippets; popup.js loads one page-text record only when that page is expanded.
 
 pdfjs/
@@ -289,7 +289,7 @@ belongs to `node.keys[i]`; internal nodes have no posting lists.
   other text and may also match a search query.
 
 Search operates on the in-memory tree after extraction or restore. IndexedDB
-persists a compressed serialized copy and page text records locally; it does not make the B-tree
+persists a plain serialized copy and page text records locally; it does not make the B-tree
 itself a disk-based tree, provide fixed-size block access, or change node
 operations into disk I/O.
 

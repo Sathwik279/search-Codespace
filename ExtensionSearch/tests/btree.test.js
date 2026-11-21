@@ -156,7 +156,7 @@ test("stores token ordinals with character positions", () => {
   ]);
 });
 
-test("stores typed posting buffers and serializes delta VByte postings", () => {
+test("stores typed posting buffers and serializes delta postings", () => {
   const tree = new StringBTree(2);
   tree.insert("word", { page: 1, position: 100, ordinal: 4 });
   tree.insert("word", { page: 1, position: 140, ordinal: 9 });
@@ -167,11 +167,26 @@ test("stores typed posting buffers and serializes delta VByte postings", () => {
 
   const serialized = tree.serialize();
   const encoded = serialized.root.postings[0];
-  assert.equal(encoded.encoding, "delta-vbyte");
-  assert.equal(typeof encoded.data, "string");
+  assert.equal(encoded.encoding, "delta");
+  assert.ok(Array.isArray(encoded.data));
   assert.equal(encoded.count, 1);
   assert.deepEqual(
     StringBTree.deserialize(JSON.parse(JSON.stringify(serialized))).search("word"),
     [{ page: 1, positions: [100, 140], ordinals: [4, 9] }]
+  );
+});
+
+test("rejects plain-array posting lists instead of supporting a second format", () => {
+  const tree = new StringBTree(2);
+  tree.insert("word", { page: 1, position: 100, ordinal: 4 });
+  const serialized = tree.serialize();
+  serialized.root.postings = [{
+    page: 1,
+    positions: [100],
+    ordinals: [4]
+  }];
+  assert.throws(
+    () => StringBTree.deserialize(serialized),
+    /Stored B-tree postings are invalid/
   );
 });

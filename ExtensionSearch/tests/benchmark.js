@@ -93,7 +93,7 @@ async function runBenchmarkSuite() {
     console.log(`* Total Indexed Words: ${buildResult.indexedWordCount.toLocaleString()}`);
     console.log(`* In-Memory Heap Overhead: ~${heapUsedMB} MB`);
     console.log(`* Serialized Storage (IndexedDB): ${totalStorageKB} KB`);
-    console.log("* Posting lists: Uint32Array buffers with delta + VByte serialization");
+    console.log("* Posting lists: Uint32Array buffers with delta serialization");
     console.log("* Page text storage: separate IndexedDB records for lazy snippet loading");
     console.log(`  - B+ Tree Inverted Index: ${(serializedTerms.length / 1024).toFixed(2)} KB`);
     console.log(`  - Permuterm Index: ${(serializedPermuterm.length / 1024).toFixed(2)} KB`);
